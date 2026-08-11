@@ -1,0 +1,221 @@
+<!--
+  ID allocation:
+    100333-100339   Kerberos failure detection (AD correlation namespace 100300-100399)
+    100218-100219   OverPass-the-Hash (logon events namespace 100200-100299)
+-->
+
+<group name="windows,windows_security,ad,kerberos,">
+
+  <!-- ============================================================
+       SECTION 1 - Kerberos pre-authentication failure (4771)
+       ============================================================
+       Event 4771 fires on DCs for each failed Kerberos pre-auth.
+       The most common spray indicator is Status 0x18
+       (KDC_ERR_PREAUTH_FAILED = bad password).
+       NOTE: The raw EventData XML field is named "Status" (not
+       "FailureCode" - that is only the friendly Event Viewer label).
+       Other codes:
+         0x12 = account disabled/locked/expired
+         0x17 = password expired
+         0x24 = clock skew
+       ============================================================ -->
+
+  <!-- Base: any 4771 -->
+  <rule id="100333" level="3">
+    <if_sid>60104</if_sid>
+    <field name="win.system.eventID">^4771$</field>
+    <options>no_full_log</options>
+    <description>AD/Kerberos: Pre-authentication failed for $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress) - status $(win.eventdata.status)</description>
+    <mitre>
+      <id>T1110.003</id>
+    </mitre>
+    <group>kerberos_failure,authentication_failed,</group>
+  </rule>
+
+  <!-- 4771 with Status 0x18 - bad password (high-signal spray indicator).
+       NOTE: The raw EventData XML field is "Status", NOT "FailureCode".
+       "Failure Code" is only the friendly display label in Event Viewer;
+       the actual field name (and what Wazuh's eventchannel decoder produces
+       in JSON) is win.eventdata.status. Confirmed via Microsoft Learn raw
+       event XML schema for event 4771. -->
+  <rule id="100334" level="5">
+    <if_sid>100333</if_sid>
+    <field name="win.eventdata.status">^0x18$</field>
+    <options>no_full_log</options>
+    <description>AD/Kerberos: Bad password (pre-auth 0x18) for $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress)</description>
+    <mitre>
+      <id>T1110.003</id>
+    </mitre>
+    <group>kerberos_failure,bad_password,</group>
+  </rule>
+
+  <!-- Correlation: password spray - 15+ bad-password pre-auth failures from
+       same source IP in 60s -->
+  <rule id="100335" level="13" frequency="15" timeframe="60">
+    <if_matched_sid>100334</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>AD/Kerberos: Possible password spray - 15+ Kerberos bad-password failures from $(win.eventdata.ipAddress) in 60s</description>
+    <mitre>
+      <id>T1110.003</id>
+      <id>T1110.004</id>
+    </mitre>
+    <group>kerberos_failure,password_spray,brute_force,</group>
+  </rule>
+
+  <!-- Correlation: targeted brute force - 5 bad-password pre-auth failures for
+       the SAME account in 120s. Mirrors the NTLM RDP chain (100215) so a slow,
+       targeted password-guessing attack against one domain account over RDP-by-
+       hostname (Kerberos path, no 4625) escalates to level 10 instead of leaving
+       only level-5 100334 singles below the high/critical threshold. Keyed on
+       targetUserName (not ipAddress) so it catches single-account attacks that
+       the spray rule 100335 (15/60s by IP) is too wide to see. -->
+  <rule id="100339" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>100334</if_matched_sid>
+    <same_field>win.eventdata.targetUserName</same_field>
+    <options>no_full_log</options>
+    <description>AD/Kerberos: Targeted brute force - 5+ bad-password pre-auth failures for $(win.eventdata.targetUserName) in 120s</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>kerberos_failure,brute_force,attack,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 2 - TGT request failure (4768) for username enumeration
+       ============================================================
+       Event 4768 fires for every TGT-AS-REQ. Status 0x0 = success.
+       Status 0x6 = "client not found in Kerberos database" - meaning
+       the username does NOT exist. Bursts of 0x6 from one source =
+       classic username enumeration prior to spray.
+       ============================================================ -->
+
+  <!-- Base: any 4768 with non-zero Status (failure) -->
+  <rule id="100336" level="3">
+    <if_sid>60104</if_sid>
+    <field name="win.system.eventID">^4768$</field>
+    <field name="win.eventdata.status" type="pcre2">^0x(?!0$).+</field>
+    <options>no_full_log</options>
+    <description>AD/Kerberos: TGT request failed for $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress) - status $(win.eventdata.status)</description>
+    <mitre>
+      <id>T1110.003</id>
+    </mitre>
+    <group>kerberos_failure,</group>
+  </rule>
+
+  <!-- 4768 status 0x6 - unknown username (recon signal) -->
+  <rule id="100337" level="5">
+    <if_sid>100336</if_sid>
+    <field name="win.eventdata.status">^0x6$</field>
+    <options>no_full_log</options>
+    <description>AD/Kerberos: Unknown username in TGT request - $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress) (possible enumeration)</description>
+    <mitre>
+      <id>T1087.002</id>
+      <id>T1110.003</id>
+    </mitre>
+    <group>kerberos_failure,recon,</group>
+  </rule>
+
+  <!-- Correlation: username enumeration burst - 20+ unknown usernames probed
+       from same source IP in 2min -->
+  <rule id="100338" level="13" frequency="20" timeframe="120">
+    <if_matched_sid>100337</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>AD/Kerberos: Username enumeration - 20+ unknown usernames probed from $(win.eventdata.ipAddress) in 2min</description>
+    <mitre>
+      <id>T1087.002</id>
+      <id>T1110.003</id>
+    </mitre>
+    <group>kerberos_failure,recon,enumeration,</group>
+  </rule>
+
+</group>
+
+
+<group name="windows,windows_security,authentication_success,">
+
+  <!-- ============================================================
+       SECTION 3 - OverPass-the-Hash signature (4624)
+       ============================================================
+       Mimikatz "sekurlsa::pth" produces this exact 4624 pattern on
+       the host where the hash was injected (the attacker's machine):
+         LogonType            = 9   (NewCredentials)
+         LogonProcessName     = seclogo
+         AuthenticationPackage= Negotiate
+
+       Legitimate "runas /netonly /user:..." also produces this
+       pattern, so level is 12 not 15. Tune via negate clauses for
+       known admin workflows after baseline observation.
+
+       PARENT: chained under 100206 (your LogonType-9 rule), which now
+       chains under default 60106. This guarantees precedence over the
+       generic 100206 alert regardless of rule-file load order.
+       ============================================================ -->
+
+  <!-- Single OPtH signature -->
+  <rule id="100218" level="12">
+    <if_sid>100206</if_sid>
+    <field name="win.system.eventID">^4624$</field>
+    <field name="win.eventdata.logonType">^9$</field>
+    <field name="win.eventdata.logonProcessName" type="pcre2">(?i)^seclogo$</field>
+    <field name="win.eventdata.authenticationPackageName" type="pcre2">(?i)^Negotiate$</field>
+    <!-- ROUTING 2026-07-08: demoted to digest. `runas /netonly` produces the
+         identical LogonType-9 + seclogo + Negotiate signature and is standard
+         tiered-admin practice; baseline + negate known admin hosts before Tier-1. -->
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>Logon: Possible OverPass-the-Hash - LogonType 9 (NewCredentials) + seclogo + Negotiate on $(win.system.computer) - subject $(win.eventdata.subjectUserName), target $(win.eventdata.targetUserName)</description>
+    <mitre>
+      <id>T1550.002</id>
+      <id>T1003.001</id>
+    </mitre>
+    <group>authentication_success,pth,overpass_the_hash,suspicious_logon,</group>
+  </rule>
+
+  <!-- Correlation: repeated OPtH by same subject within 5min - strong
+       Mimikatz iteration indicator -->
+  <rule id="100219" level="14" frequency="2" timeframe="300">
+    <if_matched_sid>100218</if_matched_sid>
+    <same_field>win.eventdata.subjectUserName</same_field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>Logon: Repeated OverPass-the-Hash by $(win.eventdata.subjectUserName) - 2+ LogonType 9 + seclogo events in 5min</description>
+    <mitre>
+      <id>T1550.002</id>
+      <id>T1003.001</id>
+    </mitre>
+    <group>authentication_success,pth,overpass_the_hash,lateral_movement,</group>
+  </rule>
+
+  <!-- ============================================================
+       AS-REP Roasting detection (EID 4768 SUCCESS)
+       Fires when the KDC issues a TGT for an account that does NOT require
+       Kerberos pre-authentication (DONT_REQUIRE_PREAUTH) — the precondition
+       for offline AS-REP hash cracking.
+       Uses if_sid 60103 (AUDIT_SUCCESS): 4768 success events go through 60103,
+       NOT 60104. (4768 failures use if_sid 60104 — see rules 100336/100337.)
+
+       FIX 2026-07-11 (validated by pentest): the previous version matched
+       win.eventdata.ticketOptions == 0x40800010 (the Rubeus value). impacket's
+       GetNPUsers produces ticketOptions 0x50800000, so the rule NEVER fired
+       against impacket-based AS-REP roasting. The definitive, tool-agnostic
+       signature is PreAuthType == 0 on a SUCCESSFUL 4768 for a real account:
+       only DONT_REQUIRE_PREAUTH accounts ever produce this. Confirmed against
+       a live 4768 captured off a domain controller (test account, PreAuthType 0). -->
+  <rule id="100358" level="12">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4768$</field>
+    <field name="win.eventdata.preAuthType">^0$</field>
+    <field name="win.eventdata.targetUserName" negate="yes" type="pcre2">\$$|^krbtgt$</field>
+    <options>no_full_log</options>
+    <description>AD: AS-REP Roasting — TGT issued without pre-auth (PreAuthType 0) for $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress)</description>
+    <mitre>
+      <id>T1558.004</id>
+    </mitre>
+    <group>attack,credential_theft,kerberos,</group>
+  </rule>
+
+</group>

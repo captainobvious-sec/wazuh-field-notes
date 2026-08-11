@@ -1,0 +1,156 @@
+<!-- ============================================================
+     DEFAULT-RULE ROUTING OVERRIDES — Windows
+     Created 2026-07-08 (alerting-discipline review).
+
+     WHY THIS FILE EXISTS
+     We must not e-mail on a handful of noisy Wazuh DEFAULT rules, and we must
+     e-mail on two that ship below threshold. Editing the shipped default files
+     (/var/ossec/ruleset/rules/*) is the WRONG way: (1) the deploy script never
+     touches that directory, so the change never reaches the manager, and
+     (2) a Wazuh upgrade overwrites it. This is a CUSTOM file (etc/rules/), so it
+     deploys with deploy-rules-to-manager.sh like every other 10x file AND
+     survives upgrades. It supersedes the in-place edits in this repo's
+     Windows/rules/default/* copies (those are now documentation only).
+
+     HOW IT WORKS
+     overwrite="yes" replaces the default rule of the same id. Custom rules in
+     etc/rules load AFTER ruleset/rules, so the override always wins — and
+     analysisd does NOT raise a duplicate-id warning (that is what overwrite is
+     for). Each rule body below is an exact copy of the shipped default with a
+     single routing option added; if a future Wazuh version changes one of these
+     rule bodies, re-copy it here so the override stays faithful.
+
+     DEMOTED (no_email_alert): 91822/91823 remote Invoke-Command (was the biggest
+     noise source - double-emailed every remote command), 91803 screen-capture,
+     60015 multiple-critical aggregate, 92650 %systemroot% service, 92655
+     PrintNightmare driver-load failure, 60162/60171/60187/60188/60189
+     Guests/RODC/Crypto group changes.
+     (Crown-jewel group changes 60154/60156/60159/60164/60166/60167/60176 are
+      NOT here - they stay Tier-1 and keep e-mailing by the level-12 threshold.)
+     ============================================================ -->
+<group name="windows,default_override,">
+  <rule id="91822" level="12" overwrite="yes">
+    <if_sid>91802</if_sid>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Invoke-Command</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>Powershell script used "Invoke-command" cmdlet to execute sub script</description>
+    <mitre>
+      <id>T1059.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="91823" level="14" overwrite="yes">
+    <if_sid>91822</if_sid>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)(ComputerName|Cn)</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>Powershell script used "Invoke-command" cmdlet to execute code on remote computer</description>
+    <mitre>
+      <id>T1059.001</id>
+      <id>T1021.006</id>
+    </mitre>
+  </rule>
+
+  <rule id="91803" level="14" overwrite="yes">
+    <if_sid>91802</if_sid>
+    <field name="win.system.message" type="pcre2">CopyFromScreen</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>Screen capture method invoked from PowerShell script.</description>
+    <mitre>
+      <id>T1113</id>
+    </mitre>
+  </rule>
+
+  <rule id="60015" level="12" frequency="4" timeframe="240" overwrite="yes">
+    <if_matched_sid>60012</if_matched_sid>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>Multiple Windows critical events.</description>
+  </rule>
+
+  <rule id="92650" level="12" overwrite="yes">
+    <if_sid>61138</if_sid>
+    <field name="win.eventdata.imagePath">^%systemroot%\\\\\w+\.exe$</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>New Windows Service Created to start from windows root path. Suspicious event as the binary may have been dropped using Windows Admin Shares.</description>
+    <mitre>
+      <id>T1021.002</id>
+      <id>T1569.002</id>
+    </mitre>
+  </rule>
+
+  <rule id="92655" level="15" overwrite="yes">
+    <if_sid>60011</if_sid>
+    <field name="win.system.eventID">^808$</field>
+    <options>no_email_alert</options>
+    <description>Printer driver failed to load, possible remote code execution using PrinterNightmare exploit: CVE-2021-34527.</description>
+    <mitre>
+      <id>T1210</id>
+      <id>T1547.012</id>
+    </mitre>
+  </rule>
+
+  <rule id="60162" level="12" overwrite="yes">
+    <if_sid>60141,60142</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-\S+-514$</field>
+    <description>Domain Guests Group Changed</description>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <group>group_changed,win_group_changed,pci_dss_8.1.2,pci_dss_10.2.5,gpg13_7.10,gdpr_IV_35.7.d,gdpr_IV_32.2,hipaa_164.312.a.2.I,hipaa_164.312.a.2.II,hipaa_164.312.b,nist_800_53_AC.2,nist_800_53_IA.4,nist_800_53_AU.14,nist_800_53_AC.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+    <mitre>
+      <id>T1484</id>
+    </mitre>
+  </rule>
+
+  <rule id="60171" level="12" overwrite="yes">
+    <if_sid>60144,60145</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-\S+-546$</field>
+    <description>Guests Group Changed</description>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <group>group_changed,win_group_changed,pci_dss_8.1.2,pci_dss_10.2.5,gpg13_7.10,gdpr_IV_35.7.d,gdpr_IV_32.2,hipaa_164.312.a.2.I,hipaa_164.312.a.2.II,hipaa_164.312.b,nist_800_53_AC.2,nist_800_53_IA.4,nist_800_53_AU.14,nist_800_53_AC.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+    <mitre>
+      <id>T1484</id>
+    </mitre>
+  </rule>
+
+  <rule id="60187" level="12" overwrite="yes">
+    <if_sid>60149,60150,60151,60152</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-21\S+-498$</field>
+    <description>Enterprise Read-only Domain Controllers Group Changed</description>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <group>group_changed,win_group_changed,pci_dss_8.1.2,pci_dss_10.2.5,gpg13_7.10,gdpr_IV_35.7.d,gdpr_IV_32.2,hipaa_164.312.a.2.I,hipaa_164.312.a.2.II,hipaa_164.312.b,nist_800_53_AC.2,nist_800_53_IA.4,nist_800_53_AU.14,nist_800_53_AC.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+    <mitre>
+      <id>T1484</id>
+    </mitre>
+  </rule>
+
+  <rule id="60188" level="12" overwrite="yes">
+    <if_sid>60144,60145</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-21\S+-521$</field>
+    <description>Read-only Domain Controllers Group Changed</description>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <group>group_changed,win_group_changed,pci_dss_8.1.2,pci_dss_10.2.5,gpg13_7.10,gdpr_IV_35.7.d,gdpr_IV_32.2,hipaa_164.312.a.2.I,hipaa_164.312.a.2.II,hipaa_164.312.b,nist_800_53_AC.2,nist_800_53_IA.4,nist_800_53_AU.14,nist_800_53_AC.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+    <mitre>
+      <id>T1484</id>
+    </mitre>
+  </rule>
+
+  <rule id="60189" level="12" overwrite="yes">
+    <if_sid>60144,60145</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-32-569$</field>
+    <description>Cryptographic Operators Group Changed</description>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <group>group_changed,win_group_changed,pci_dss_8.1.2,pci_dss_10.2.5,gpg13_7.10,gdpr_IV_35.7.d,gdpr_IV_32.2,hipaa_164.312.a.2.I,hipaa_164.312.a.2.II,hipaa_164.312.b,nist_800_53_AC.2,nist_800_53_IA.4,nist_800_53_AU.14,nist_800_53_AC.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+    <mitre>
+      <id>T1484</id>
+    </mitre>
+  </rule>
+
+</group>

@@ -1,0 +1,248 @@
+<!-- ============================================================
+     SECTION 1 - Silence default leaves replaced by custom rules
+     overwrite="yes" REPLACES the default rule wholesale, so each block
+     below restates the original's parent + eventID match and just sets
+     level 0. (The match does NOT have to be byte-identical to the
+     original — see 60112, which intentionally also adds 4715 — but
+     keeping it aligned avoids silently changing what the gate matches.)
+     Children (your 1003xx rules) keep firing because the level-0 parent
+     still routes events to them.
+     ============================================================ -->
+<group name="windows,">
+
+  <!-- 4624 success "Windows Logon Success": replaced by 100200-100208
+       (per-logon-type). Silenced to L0 - it still ROUTES to both your
+       100200-series AND the 0840 RDP chain (92651->92653/92657), which
+       both chain from 60106. So RDP detection via 0840 keeps working. -->
+  <rule id="60106" level="0" overwrite="yes">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^528$|^540$|^673$|^4624$|^4769$</field>
+    <description>Windows Logon Success (silenced - see 100200-100208 / 0840 RDP)</description>
+    <options>no_full_log</options>
+    <group>authentication_success,</group>
+  </rule>
+
+  <!-- 92651 is the default "remote logon" gate (child of 60106). It matches ANY
+       4624/4769 that carries a non-loopback IPv4 and, being a default rule, is
+       evaluated BEFORE our custom children of 60106 — so it shadows them for every
+       event with a real IP, including 4769 (Kerberoasting 110002 / Silver Ticket
+       100360). Scope it to 4624 so 4769 falls through to the custom AD-attack rules.
+       Its RDP/NTLM children (92652/92653/92657) are all 4624-based -> unaffected. -->
+  <rule id="92651" level="0" overwrite="yes">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4624$</field>
+    <field name="win.eventdata.ipAddress" type="pcre2">(?:[0-9]{1,3}\.){3}[0-9]{1,3}</field>
+    <field name="win.eventdata.ipAddress" type="pcre2" negate="yes">127\.0\.0\.1</field>
+    <description>Successful Remote Logon (scoped to 4624 so 4769 reaches custom rules)</description>
+    <group>authentication_success,</group>
+  </rule>
+
+  <!-- 4625 failure: replaced by 100210-100214. Silenced to L0,
+       still routes to those children. -->
+  <rule id="60122" level="0" overwrite="yes">
+    <if_sid>60105</if_sid>
+    <field name="win.system.eventID">^529$|^4625$</field>
+    <description>Logon Failure (silenced - see 100210-100214)</description>
+    <options>no_full_log</options>
+    <group>authentication_failed,</group>
+  </rule>
+
+  <!-- 4740 lockout: replaced by 100300 (+correlation 100301) -->
+  <rule id="60115" level="0" overwrite="yes">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^644$|^4740$</field>
+    <description>Account locked out (silenced - see 100300)</description>
+    <options>no_full_log</options>
+    <group>account_changed,</group>
+  </rule>
+
+  <!-- 4720/4722 created/enabled: replaced by 100304/100306 -->
+  <rule id="60109" level="0" overwrite="yes">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^624$|^626$|^4720$|^4722$</field>
+    <description>Account created/enabled (silenced - see 100304/100306)</description>
+    <options>no_full_log</options>
+    <group>account_changed,</group>
+  </rule>
+
+  <!-- 4725/4726 disabled/deleted: replaced by 100307/100305 -->
+  <rule id="60111" level="0" overwrite="yes">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^630$|^629$|^4725$|^4726$</field>
+    <description>Account disabled/deleted (silenced - see 100305/100307)</description>
+    <options>no_full_log</options>
+    <group>account_changed,</group>
+  </rule>
+
+  <!-- Group membership parent 60113: children 60141/42/44/45/51/52
+       are what actually fire. We silence those leaves below, but
+       60113 itself must stay intact (it's the parent your rules and
+       the leaves both chain from). Leave 60113 alone. -->
+
+  <rule id="60141" level="0" overwrite="yes">
+    <if_sid>60113</if_sid>
+    <field name="win.system.eventID">^632$|^4728$</field>
+    <description>Global group member added (silenced - see 100310)</description>
+    <options>no_full_log</options>
+    <group>account_changed,</group>
+  </rule>
+
+  <rule id="60142" level="0" overwrite="yes">
+    <if_sid>60113</if_sid>
+    <field name="win.system.eventID">^633$|^4729$</field>
+    <description>Global group member removed (silenced - see 100313)</description>
+    <options>no_full_log</options>
+    <group>account_changed,</group>
+  </rule>
+
+  <rule id="60144" level="0" overwrite="yes">
+    <if_sid>60113</if_sid>
+    <field name="win.system.eventID">^636$|^4732$</field>
+    <description>Local group member added (silenced - see 100311)</description>
+    <options>no_full_log</options>
+    <group>account_changed,</group>
+  </rule>
+
+  <rule id="60145" level="0" overwrite="yes">
+    <if_sid>60113</if_sid>
+    <field name="win.system.eventID">^637$|^4733$</field>
+    <description>Local group member removed (silenced - see 100314)</description>
+    <options>no_full_log</options>
+    <group>account_changed,</group>
+  </rule>
+
+  <rule id="60151" level="0" overwrite="yes">
+    <if_sid>60113</if_sid>
+    <field name="win.system.eventID">^660$|^4756$</field>
+    <description>Universal group member added (silenced - see 100312)</description>
+    <options>no_full_log</options>
+    <group>account_changed,</group>
+  </rule>
+
+  <rule id="60152" level="0" overwrite="yes">
+    <if_sid>60113</if_sid>
+    <field name="win.system.eventID">^661$|^4757$</field>
+    <description>Universal group member removed (silenced - see 100315)</description>
+    <options>no_full_log</options>
+    <group>account_changed,</group>
+  </rule>
+
+  <!-- 1102 log cleared: replaced by 100352 (parent is 60100) -->
+  <rule id="60117" level="0" overwrite="yes">
+    <if_sid>60100</if_sid>
+    <field name="win.system.eventID">^517$|^1102$</field>
+    <description>Audit log cleared (silenced - see 100352)</description>
+    <options>no_full_log</options>
+    <group>logs_cleared,</group>
+  </rule>
+
+  <!-- 4719/4907/4912 audit policy events: all three are now covered by
+       custom rules 100351/100362/100363 in 104-ad_correlation_rules.xml.
+       60112 is silenced here so only the specific custom rules alert.
+       NOTE: this overwrite also adds 4715 (the original default match had
+       a duplicated 4719 and no 4715) — intentional and harmless. -->
+  <rule id="60112" level="0" overwrite="yes">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^612$|^643$|^4719$|^4907$|^4912$|^4715$</field>
+    <description>Audit policy changed (silenced - see 100351/100362/100363)</description>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- 5136 DS object modified: replaced by 100350 -->
+  <rule id="60229" level="0" overwrite="yes">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^5136$</field>
+    <description>DS object modified (silenced - see 100350)</description>
+    <options>no_full_log</options>
+    <group>policy_changed,</group>
+  </rule>
+
+  <!-- 4634/4647 logoff: replaced by 100220/100221 (both level 2,
+       low value - if you'd rather just keep the default 60137 logoff
+       rule and drop your 100220/221, that's fine too. We silence
+       60137 here since your rules split system vs user logoff.) -->
+  <rule id="60137" level="0" overwrite="yes">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^538$|^551$|^4634$|^4647$</field>
+    <description>User logoff (silenced - see 100220/100221)</description>
+    <options>no_full_log</options>
+    <group>logoff,</group>
+  </rule>
+
+</group>
+
+
+<!-- ============================================================
+     SECTION 2 - Custom DC detections (no default equivalent)
+     ============================================================ -->
+<group name="security_event,windows,">
+
+  <!-- DCSync: ignore replication from machine accounts (normal).
+       No default matches 4662, so this is a clean child of 60103.
+       Pairs with 100332 (which excludes machine accounts). -->
+  <rule id="110009" level="0">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4662$</field>
+    <field name="win.eventdata.properties" type="pcre2">{1131f6aa-9c07-11d1-f79f-00c04fc2dcd2}|{1131f6ad-9c07-11d1-f79f-00c04fc2dcd2}|{19195a5b-6da0-11d0-afd3-00c04fd930c9}</field>
+    <field name="win.eventdata.subjectUserName" type="pcre2">\$$</field>
+    <options>no_full_log</options>
+    <description>Ignore Directory Service Access from machine account (normal DC replication)</description>
+  </rule>
+
+  <!-- Kerberoasting: 4769 RC4 + forwardable/renewable/canonicalize,
+       excluding machine accounts and krbtgt. Chains from default
+       60106 (which matches 4769 success). Feeds correlation 100331. -->
+  <rule id="110002" level="10">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4769$</field>
+    <field name="win.eventdata.ticketOptions" type="pcre2">0x40810000</field>
+    <field name="win.eventdata.ticketEncryptionType" type="pcre2">0x17</field>
+    <field name="win.eventdata.serviceName" negate="yes" type="pcre2">\$$|^krbtgt$</field>
+    <options>no_full_log</options>
+    <description>Possible Kerberoasting - RC4 TGS request for $(win.eventdata.serviceName) by $(win.eventdata.targetUserName)</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+    <group>attack,credential_theft,kerberoasting,</group>
+  </rule>
+
+  <!-- Golden Ticket: 4624 logonType 3, Kerberos + null GUID.
+       Chains from your 100202 (network logon). The Kerberos filter
+       removes the NTLM false positives that plagued the old version. -->
+  <rule id="110003" level="12">
+    <if_sid>100202</if_sid>
+    <field name="win.eventdata.authenticationPackageName" type="pcre2">(?i)^Kerberos$</field>
+    <field name="win.eventdata.logonGuid" type="pcre2">^\{0+\-0+\-0+\-0+\-0+\}$</field>
+    <options>no_full_log</options>
+    <description>Possible Golden Ticket - Kerberos network logon with null GUID on $(win.system.computer) by $(win.eventdata.targetUserName)</description>
+    <mitre>
+      <id>T1558.001</id>
+    </mitre>
+    <group>attack,credential_theft,golden_ticket,</group>
+  </rule>
+
+  <!-- Silver Ticket — forged service ticket (4769 success).
+       Indicators: RC4 (0x17) or RC4-HMAC-EXP (0x23) encryption on a TGS for a
+       non-machine, non-krbtgt SPN, without the Kerberoasting ticket options flag.
+       Parent if_sid 60106 covers 4769 (confirmed in 0580:line 78).
+       Kerberoasting ticketOptions 0x40810000 is excluded so this does not overlap
+       with rule 110002 (Kerberoasting single) or 100331 (Kerberoasting burst). -->
+  <rule id="100360" level="13">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4769$</field>
+    <field name="win.eventdata.ticketEncryptionType" type="pcre2">0x17|0x23</field>
+    <field name="win.eventdata.serviceName" negate="yes" type="pcre2">\$$|^krbtgt$</field>
+    <field name="win.eventdata.ticketOptions" negate="yes" type="pcre2">0x40810000</field>
+    <!-- ROUTING 2026-07-08: demoted to digest (no_email_alert). Any legacy RC4
+         service ticket matches this heuristic + documented field quirks (0x23,
+         subjectUserName often absent on 4769); too FP-prone for a real-time email. -->
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>AD: Possible Silver Ticket — RC4 service ticket for $(win.eventdata.serviceName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1558.002</id>
+    </mitre>
+    <group>attack,credential_theft,silver_ticket,</group>
+  </rule>
+
+</group>

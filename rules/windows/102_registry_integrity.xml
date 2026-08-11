@@ -1,0 +1,350 @@
+<!-- FIX 2026-07-03 — registry FIM parent SIDs corrected.
+     These rules previously chained if_sid 550/553/554, which are the FILE
+     syscheck rules (decoded_as syscheck_integrity_changed / _deleted /
+     _new_entry). Windows REGISTRY FIM events are decoded as syscheck_registry_*
+     and fire different rules, so none of these ever fired:
+        594 registry key modified   750 registry value modified
+        597 registry key deleted     751 registry value deleted
+        598 registry key added       752 registry value added
+     All "any change" rules now chain 594,597,598,750,751,752 (key+value, all
+     ops). Op-specific rules (100530/100531) chain the matching subset.
+     NOTE: this only fires if the agent's ossec.conf actually monitors these
+     hives via <windows_registry>. Confirm with wazuh-logtest on a real
+     syscheck_registry event before trusting coverage. -->
+
+<!-- ALERT ROUTING 2026-07-08 — the whole registry-FIM pipeline is still
+     UNVERIFIED on a live agent, and GPO refresh / patching / software installs
+     produce heavy registry churn on most of these keys. So the generic and
+     DC-service registry rules are set no_email_alert (Tier-2 / dashboard+digest)
+     until a 30-day baseline proves the provably-silent DC keys (NTDS/Kdc/Spooler).
+     KEPT EMAILING (Tier-1, effectively zero legitimate churn): 100502 WDigest,
+     100503 SSP list, 100520 IFEO, 100522 AppInit_DLLs. -->
+<group name="windows,registry_integrity,syscheck,">
+
+  <!-- ============================================================
+       SECTION 1 — Persistence (Run Keys)
+  ============================================================ -->
+
+  <!-- Run / RunOnce key modified — classic persistence -->
+  <rule id="100500" level="12">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">CurrentVersion\\Run</field>
+    <options>no_email_alert</options>
+    <description>Registry: Run/RunOnce key changed — possible persistence on $(agent.name)</description>
+    <mitre>
+      <id>T1547.001</id>
+    </mitre>
+    <group>registry,persistence,</group>
+  </rule>
+
+
+  <!-- ============================================================
+       SECTION 2 — Credential Protection (LSA / WDigest)
+  ============================================================ -->
+
+  <!-- LSA registry key modified — RunAsPPL, auth packages, notification DLLs -->
+  <rule id="100501" level="13">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path" type="pcre2">Control\\Lsa($|\\)</field>
+    <field name="syscheck.path" negate="yes" type="pcre2">Control\\Lsa\\OSConfig</field>
+    <options>no_email_alert</options>
+    <description>Registry: LSA key modified — credential protection settings changed on $(agent.name)</description>
+    <mitre>
+      <id>T1556.002</id>
+    </mitre>
+    <group>registry,credential_access,defense_evasion,</group>
+  </rule>
+
+  <!-- WDigest modified — plaintext credential caching may be re-enabled.
+       TIER-1: near-zero legitimate churn; re-enabling plaintext creds. -->
+  <rule id="100502" level="14">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">SecurityProviders\\WDigest</field>
+    <description>Registry: WDigest key modified — plaintext credential caching may be enabled on $(agent.name)</description>
+    <mitre>
+      <id>T1556.002</id>
+    </mitre>
+    <group>registry,credential_access,</group>
+  </rule>
+
+  <!-- SSP/Security Provider list — injected DLLs load into LSASS.
+       TIER-1: near-zero legitimate churn; LSASS DLL injection. -->
+  <rule id="100503" level="14">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Control\\Lsa\\OSConfig</field>
+    <description>Registry: LSA OSConfig modified — Security Support Provider list may have changed on $(agent.name)</description>
+    <mitre>
+      <id>T1547.005</id>
+    </mitre>
+    <group>registry,persistence,credential_access,</group>
+  </rule>
+
+
+  <!-- ============================================================
+       SECTION 3 — Defense Evasion
+  ============================================================ -->
+
+  <!-- Windows Defender policy key modified -->
+  <rule id="100510" level="14">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Policies\\Microsoft\\Windows Defender</field>
+    <options>no_email_alert</options>
+    <description>Registry: Windows Defender policy key modified on $(agent.name) — protection may be disabled</description>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+    <group>registry,defense_evasion,</group>
+  </rule>
+
+  <!-- Windows Defender real-time settings modified.
+       Excludes the Policies subtree so this does not double-alert with 100510
+       (which owns Policies\Microsoft\Windows Defender). -->
+  <rule id="100511" level="14">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Microsoft\\Windows Defender</field>
+    <field name="syscheck.path" negate="yes" type="pcre2">Policies\\Microsoft\\Windows Defender</field>
+    <options>no_email_alert</options>
+    <description>Registry: Windows Defender settings modified on $(agent.name)</description>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+    <group>registry,defense_evasion,</group>
+  </rule>
+
+  <!-- UAC policy modified — disabling prompts is a common escalation step -->
+  <rule id="100512" level="13">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Policies\\System</field>
+    <options>no_email_alert</options>
+    <description>Registry: UAC/system policy key modified on $(agent.name)</description>
+    <mitre>
+      <id>T1548.002</id>
+    </mitre>
+    <group>registry,defense_evasion,privilege_escalation,</group>
+  </rule>
+
+  <!-- Audit policy registry key modified — possible attempt to blind logging -->
+  <rule id="100513" level="14">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">SECURITY\\Policy\\PolAdtEv</field>
+    <options>no_email_alert</options>
+    <description>Registry: Audit policy registry key modified on $(agent.name) — logging may be reduced</description>
+    <mitre>
+      <id>T1562.002</id>
+    </mitre>
+    <group>registry,defense_evasion,</group>
+  </rule>
+
+
+  <!-- ============================================================
+       SECTION 4 — Backdoors / Code Injection
+  ============================================================ -->
+
+  <!-- Image File Execution Options — debugger hijacking (accessibility backdoor).
+       TIER-1: near-zero legitimate churn; debugger-hijack / accessibility backdoor. -->
+  <rule id="100520" level="15">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Image File Execution Options</field>
+    <description>Registry: IFEO key modified on $(agent.name) — possible debugger hijacking or accessibility backdoor</description>
+    <mitre>
+      <id>T1546.012</id>
+    </mitre>
+    <group>registry,persistence,privilege_escalation,</group>
+  </rule>
+
+  <!-- Winlogon modified — shell or credential provider replacement -->
+  <rule id="100521" level="14">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">CurrentVersion\\Winlogon</field>
+    <options>no_email_alert</options>
+    <description>Registry: Winlogon key modified on $(agent.name) — shell or credential provider may have changed</description>
+    <mitre>
+      <id>T1547.004</id>
+    </mitre>
+    <group>registry,persistence,</group>
+  </rule>
+
+  <!-- AppInit_DLLs — DLL injected into every user-mode process.
+       TIER-1: near-zero legitimate churn; process-wide DLL injection. -->
+  <rule id="100522" level="15">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Windows NT\\CurrentVersion\\Windows</field>
+    <description>Registry: AppInit_DLLs key modified on $(agent.name) — DLL injection into user-mode processes possible</description>
+    <mitre>
+      <id>T1546.010</id>
+    </mitre>
+    <group>registry,persistence,</group>
+  </rule>
+
+
+  <!-- ============================================================
+       SECTION 5 — Services
+  ============================================================ -->
+
+  <!-- New service created or existing service modified.
+       FIX 2026-07-03: parent is now the ADDED+MODIFIED registry rules
+       (594/598 key, 750/752 value). Previously 550,553 = file modified+DELETED,
+       which was both the wrong ruleset and the wrong operation for "created or
+       changed". Negation lets the specific DC-service rules (100550-100557)
+       below win for those paths instead of this generic rule. -->
+  <rule id="100530" level="11">
+    <if_sid>594,598,750,752</if_sid>
+    <field name="syscheck.path">CurrentControlSet\\Services</field>
+    <field name="syscheck.path" negate="yes" type="pcre2">Services\\(Spooler|Netlogon|NTDS|Kdc|W32Time|DNS|DFSR|LanmanServer)</field>
+    <description>Registry: Services key created or modified on $(agent.name) — service created or changed</description>
+    <mitre>
+      <id>T1543.003</id>
+    </mitre>
+    <group>registry,persistence,</group>
+  </rule>
+
+  <!-- Service deleted.
+       FIX 2026-07-03: parent is now the DELETED registry rules (597 key,
+       751 value). Previously 554 = file ADDED — wrong ruleset and inverted op. -->
+  <rule id="100531" level="10">
+    <if_sid>597,751</if_sid>
+    <field name="syscheck.path">CurrentControlSet\\Services</field>
+    <description>Registry: Services key deleted on $(agent.name) — service removed</description>
+    <mitre>
+      <id>T1543.003</id>
+    </mitre>
+    <group>registry,</group>
+  </rule>
+
+
+  <!-- ============================================================
+       SECTION 6 — Remote Access / RDP
+  ============================================================ -->
+
+  <!-- RDP enable/disable or port change -->
+  <rule id="100535" level="12">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Control\\Terminal Server</field>
+    <options>no_email_alert</options>
+    <description>Registry: Terminal Server/RDP key modified on $(agent.name) — RDP may have been enabled or reconfigured</description>
+    <mitre>
+      <id>T1021.001</id>
+    </mitre>
+    <group>registry,lateral_movement,</group>
+  </rule>
+
+
+  <!-- ============================================================
+       SECTION 7 — PowerShell Execution Policy
+  ============================================================ -->
+
+  <!-- PowerShell execution policy lowered via registry -->
+  <rule id="100540" level="12">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Microsoft\\PowerShell</field>
+    <options>no_email_alert</options>
+    <description>Registry: PowerShell execution policy key modified on $(agent.name)</description>
+    <mitre>
+      <id>T1059.001</id>
+    </mitre>
+    <group>registry,defense_evasion,</group>
+  </rule>
+
+
+  <!-- ============================================================
+       SECTION 8 — DOMAIN CONTROLLER SPECIFIC
+       Apply only when agent is in windows-dc group
+  ============================================================ -->
+
+  <!-- Print Spooler re-enabled on DC (should be disabled post-PrintNightmare) -->
+  <rule id="100550" level="14">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">CurrentControlSet\\Services\\Spooler</field>
+    <options>no_email_alert</options>
+    <description>Registry: Print Spooler service key modified on DC $(agent.name) — verify spooler is not being re-enabled</description>
+    <mitre>
+      <id>T1574</id>
+    </mitre>
+    <group>registry,dc,defense_evasion,</group>
+  </rule>
+
+  <!-- Netlogon parameters changed — secure channel, DC locator behaviour -->
+  <rule id="100551" level="12">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Services\\Netlogon\\Parameters</field>
+    <options>no_email_alert</options>
+    <description>Registry: Netlogon parameters modified on DC $(agent.name)</description>
+    <mitre>
+      <id>T1562</id>
+    </mitre>
+    <group>registry,dc,</group>
+  </rule>
+
+  <!-- NTDS parameters changed — AD database path or replication config -->
+  <rule id="100552" level="13">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Services\\NTDS\\Parameters</field>
+    <options>no_email_alert</options>
+    <description>Registry: NTDS parameters modified on DC $(agent.name) — AD database config may have changed</description>
+    <mitre>
+      <id>T1562</id>
+    </mitre>
+    <group>registry,dc,</group>
+  </rule>
+
+  <!-- KDC / Kerberos settings changed — encryption types, ticket lifetime -->
+  <rule id="100553" level="13">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Services\\Kdc</field>
+    <options>no_email_alert</options>
+    <description>Registry: KDC/Kerberos settings modified on DC $(agent.name) — ticket policy or encryption types may have changed</description>
+    <mitre>
+      <id>T1558</id>
+    </mitre>
+    <group>registry,dc,</group>
+  </rule>
+
+  <!-- W32Time config changed — Kerberos is time-sensitive, time skew = auth failure -->
+  <rule id="100554" level="11">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Services\\W32Time</field>
+    <options>no_full_log</options>
+    <description>Registry: Windows Time service config modified on DC $(agent.name)</description>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+    <group>registry,dc,</group>
+  </rule>
+
+  <!-- DNS Server parameters changed -->
+  <rule id="100555" level="11">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Services\\DNS\\Parameters</field>
+    <options>no_full_log</options>
+    <description>Registry: DNS Server parameters modified on DC $(agent.name)</description>
+    <mitre>
+      <id>T1584.002</id>
+    </mitre>
+    <group>registry,dc,</group>
+  </rule>
+
+  <!-- DFSR parameters changed — SYSVOL replication health -->
+  <rule id="100556" level="11">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Services\\DFSR\\Parameters</field>
+    <options>no_full_log</options>
+    <description>Registry: DFSR parameters modified on DC $(agent.name) — SYSVOL replication config may have changed</description>
+    <mitre>
+      <id>T1490</id>
+    </mitre>
+    <group>registry,dc,</group>
+  </rule>
+
+  <!-- SMB server parameters — EternalBlue / PrintNightmare mitigations -->
+  <rule id="100557" level="12">
+    <if_sid>594,597,598,750,751,752</if_sid>
+    <field name="syscheck.path">Services\\LanmanServer\\Parameters</field>
+    <options>no_email_alert</options>
+    <description>Registry: SMB server parameters modified on DC $(agent.name) — verify SMB hardening settings are intact</description>
+    <mitre>
+      <id>T1562</id>
+    </mitre>
+    <group>registry,dc,defense_evasion,</group>
+  </rule>
+
+</group>

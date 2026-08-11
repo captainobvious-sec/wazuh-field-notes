@@ -1,0 +1,81 @@
+<!-- ============================================================
+     Proxmox VE + PBS — custom field-extraction decoders
+     Created 2026-07-10.
+
+     WHY: the shipped decoder (ruleset/decoders/0440-proxmox-ve_decoders.xml)
+     only extracts user/srcip for pvedaemon auth lines. Every other Proxmox/PBS
+     event reaches the index with NO data.* fields — detail lives only in
+     full_log free text. That is why the Proxmox dashboard panels keyed on
+     data.pve.user/.vmid/.status/.task showed nothing (those fields = 0 docs).
+
+     These sibling decoders parse the real log formats seen on Proxmox VE / PBS and populate:
+        srcip            (STANDARD — attacker IP on PBS brute force)
+        url              (STANDARD — PBS API path)
+        data.pve.method  data.pve.httpstatus  data.pve.status
+        data.pve.vmid    data.pve.task        data.pve.user
+
+     SAFE / ADDITIVE: field extraction runs at decode time and only ADDS fields;
+     it does not consume the log or stop the existing custom rules (100355,
+     100400, 100800, 100807, 100828, …) from firing. Extraction also runs BEFORE
+     a rule's no_full_log strips full_log, so VM/CT lifecycle events (which store
+     an empty full_log) still get data.pve.* populated.
+
+     DEPLOY (homelab/test manager only — optional / opt-in):
+       cp Homelab/proxmox_pve_pbs_decoders.xml /var/ossec/etc/decoders/
+       /var/ossec/bin/wazuh-analysisd -t          # validate
+       /var/ossec/bin/wazuh-control restart
+     TEST (paste a sample line):
+       echo 'Jun 23 00:11:48 backup01 proxmox-backup-proxy[628]: GET /api2/json/admin/datastore: 401 Unauthorized: [client [::ffff:198.51.100.229]:53217] authentication failed' \
+         | /var/ossec/bin/wazuh-logtest
+
+     NOTE: decoders apply at ingest — only NEW events get these fields; the
+     rebuilt dashboard panels (rule.description / agent.name) keep working on
+     historical data. Once this is live you can add panels on data.srcip
+     (top attacking IPs) and data.pve.vmid, or restore the original data.pve.*
+     panel design for go-forward data.
+     ============================================================ -->
+
+<!-- ===== PBS: proxmox-backup-proxy =====
+     Sample: proxmox-backup-proxy[628]: GET /api2/json/admin/datastore: 401 Unauthorized: [client [::ffff:198.51.100.229]:53217] authentication failed -->
+<decoder name="pbs-backup-proxy">
+  <program_name>^proxmox-backup-proxy</program_name>
+</decoder>
+
+<decoder name="pbs-backup-proxy-authfail">
+  <parent>pbs-backup-proxy</parent>
+  <prematch>authentication failed</prematch>
+  <regex type="pcre2">^(\w+) (\S+): (\d+) \w+: \[client \[(?:::ffff:)?([0-9a-fA-F:.]+)\]:\d+\] (.+)$</regex>
+  <order>pve.method, url, pve.httpstatus, srcip, pve.status</order>
+</decoder>
+
+<!-- ===== PVE scheduler (vzdump backup outcome) =====
+     Sample: pvescheduler[584736]: ERROR: Backup of VM 107 failed - lvcreate snapshot 'pve/snap_vm-107-disk-0_vzdump' error: ... -->
+<decoder name="pve-scheduler">
+  <program_name>^pvescheduler</program_name>
+</decoder>
+
+<decoder name="pve-scheduler-backup">
+  <parent>pve-scheduler</parent>
+  <prematch>Backup of VM </prematch>
+  <regex type="pcre2">Backup of VM (\d+) (\w+)</regex>
+  <order>pve.vmid, pve.status</order>
+</decoder>
+
+<!-- ===== pveproxy auth failure (parent defined in default 0440) =====
+     Sample: pveproxy[993183]: authentication failure: 401 permission denied - invalid PVE ticket -->
+<decoder name="pve-proxy-authfail">
+  <parent>pveproxy</parent>
+  <prematch>authentication failure: </prematch>
+  <regex offset="after_prematch" type="pcre2">^(\d+) (.+)$</regex>
+  <order>pve.httpstatus, pve.status</order>
+</decoder>
+
+<!-- ===== pvedaemon task / lifecycle via UPID (parent defined in default 0440) =====
+     UPID layout: UPID:<node>:<pid>:<pstart>:<starttime>:<type>:<vmid>:<user>:
+     Sample: pvedaemon[6427]: <root@pam> starting task UPID:pve01:00000000:11111111:22222222:vzstart:100:root@pam: -->
+<decoder name="pve-daemon-task">
+  <parent>pvedaemon</parent>
+  <prematch>task UPID:</prematch>
+  <regex type="pcre2">UPID:[^:]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:(\w+):(\d*):([^:]*):</regex>
+  <order>pve.task, pve.vmid, pve.user</order>
+</decoder>

@@ -1,0 +1,757 @@
+<!--
+  ad_correlation_rules.xml
+
+  
+    4740 lockout       100300  60103,60104 -> 60115
+    4720 created       100304  60103       -> 60109
+    4722 enabled       100306  60103       -> 60109
+    4726 deleted       100305  60103       -> 60111
+    4725 disabled      100307  60103       -> 60111
+    4728 g-grp add     100310  60103       -> 60141
+    4732 l-grp add     100311  60103       -> 60144
+    4756 u-grp add     100312  60103       -> 60151
+    4729 g-grp rem     100313  60103       -> 60142
+    4733 l-grp rem     100314  60103       -> 60145
+    4757 u-grp rem     100315  60103       -> 60152
+    5136 ds-modified   100350  60103       -> 60229
+    4719 audit policy  100351  60103       -> 60112
+    1102 log cleared   100352  60103,60104 -> 60117   (CRITICAL: see note)
+
+  GROUP-MEMBERSHIP NOTE (100310-100315): the default ruleset already
+  has tier-0 SID-specific rules under 60141/60142/60144/60145/60151/60152
+  (e.g. 60159 Domain Admins L12, 60154 Administrators L12, 60166 Schema
+  Admins / 60167 Enterprise Admins L12). Those load first, so changes to
+  privileged groups still alert via the default high-level rule, while
+  generic L8-L10 rules fire for all OTHER (non-tier-0) groups. This
+  is the intended, conflict-free split.
+
+  NOT shadowed - left unchanged (no default rule matches the event ID):
+    100302 (4724), 100303 (4723), 100320 (4672), 100321 (4670),
+    100322 (4648), 100332 (4662 DCSync), 100340/100341/100343 (4688).
+  Pure correlations unchanged: 100301, 100316, 100323, 100331, 100342.
+
+-->
+<group name="windows,ad_correlation,">
+
+  <!-- ============================================================
+       SECTION 1 — Account Management Events
+       ============================================================ -->
+
+  <!-- Account Lockout (4740 is audit-success on the DC; chained under 60115) -->
+  <rule id="100300" level="10">
+    <if_sid>60115</if_sid>
+    <field name="win.system.eventID">^4740$</field>
+    <options>no_full_log</options>
+    <description>AD: Account lockout — $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>authentication_failed,account_lockout,</group>
+  </rule>
+
+  <!-- Brute-force correlation: many lockouts in short window -->
+  <rule id="100301" level="13" frequency="5" timeframe="120">
+    <if_matched_sid>100300</if_matched_sid>
+    <options>no_full_log</options>
+    <description>AD: Multiple account lockouts detected — possible brute-force</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>authentication_failed,brute_force,</group>
+  </rule>
+
+  <!-- Password Reset by Admin (no default rule for 4724 — unchanged) -->
+  <rule id="100302" level="8">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4724$</field>
+    <options>no_full_log</options>
+    <description>AD: Password reset by admin — $(win.eventdata.targetUserName) reset by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>account_changed,password_reset,</group>
+  </rule>
+
+  <!-- Password Change by User (no default rule for 4723 — unchanged) -->
+  <rule id="100303" level="5">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4723$</field>
+    <options>no_full_log</options>
+    <description>AD: Password changed by user — $(win.eventdata.targetUserName)</description>
+    <group>account_changed,password_change,</group>
+  </rule>
+
+  <!-- Account Created (default 60109 matches 4720/4722; chained under it) -->
+  <rule id="100304" level="10">
+    <if_sid>60109</if_sid>
+    <field name="win.system.eventID">^4720$</field>
+    <options>no_full_log</options>
+    <description>AD: New user account created — $(win.eventdata.targetUserName) by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1136.002</id>
+    </mitre>
+    <group>account_changed,account_created,</group>
+  </rule>
+
+  <!-- Account Deleted (default 60111 matches 4725/4726; chained under it) -->
+  <rule id="100305" level="10">
+    <if_sid>60111</if_sid>
+    <field name="win.system.eventID">^4726$</field>
+    <options>no_full_log</options>
+    <description>AD: User account deleted — $(win.eventdata.targetUserName) by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1531</id>
+    </mitre>
+    <group>account_changed,account_deleted,</group>
+  </rule>
+
+  <!-- Account Enabled (default 60109 matches 4720/4722; chained under it) -->
+  <rule id="100306" level="8">
+    <if_sid>60109</if_sid>
+    <field name="win.system.eventID">^4722$</field>
+    <options>no_full_log</options>
+    <description>AD: User account enabled — $(win.eventdata.targetUserName)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>account_changed,</group>
+  </rule>
+
+  <!-- Account Disabled (default 60111 matches 4725/4726; chained under it) -->
+  <rule id="100307" level="8">
+    <if_sid>60111</if_sid>
+    <field name="win.system.eventID">^4725$</field>
+    <options>no_full_log</options>
+    <description>AD: User account disabled — $(win.eventdata.targetUserName)</description>
+    <group>account_changed,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 2 — Group Membership Changes
+       Chained under the default per-scope member rules (60141 global,
+       60144 local, 60151 universal add / 60142,60145,60152 remove).
+       Tier-0 SID rules under those parents load first and still win.
+       ============================================================ -->
+
+  <!-- Member added to Global Security Group.
+       FIX 2026-07-03: negate the tier-0 group name so a Domain Admins change
+       with a missing targetSid falls through to the name-fallback 100344
+       instead of being consumed here (both are children of 60141 and this
+       generic rule loads first). SID-present changes still hit 60159. -->
+  <rule id="100310" level="10">
+    <if_sid>60141</if_sid>
+    <field name="win.system.eventID">^4728$</field>
+    <field name="win.eventdata.targetUserName" negate="yes" type="pcre2">(?i)^Domain Admins$</field>
+    <options>no_full_log</options>
+    <description>AD: Member added to global security group $(win.eventdata.targetUserName) by $(win.eventdata.subjectUserName) — member: $(win.eventdata.memberName)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>account_changed,group_changed,</group>
+  </rule>
+
+  <!-- Member added to Local Security Group.
+       FIX 2026-07-03: negate Builtin\Administrators names so those fall through
+       to the name-fallback 100345 (see 100310). -->
+  <rule id="100311" level="10">
+    <if_sid>60144</if_sid>
+    <field name="win.system.eventID">^4732$</field>
+    <field name="win.eventdata.targetUserName" negate="yes" type="pcre2">(?i)^Administrators$|^Administratoren$|^Administrateurs$</field>
+    <options>no_full_log</options>
+    <description>AD: Member added to local security group $(win.eventdata.targetUserName) by $(win.eventdata.subjectUserName) — member: $(win.eventdata.memberName)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>account_changed,group_changed,</group>
+  </rule>
+
+  <!-- Member added to Universal Security Group.
+       FIX 2026-07-03: negate Schema/Enterprise Admins names so those fall
+       through to the name-fallbacks 100346/100347 (see 100310). -->
+  <rule id="100312" level="10">
+    <if_sid>60151</if_sid>
+    <field name="win.system.eventID">^4756$</field>
+    <field name="win.eventdata.targetUserName" negate="yes" type="pcre2">(?i)^Schema Admins$|^Enterprise Admins$</field>
+    <options>no_full_log</options>
+    <description>AD: Member added to universal security group $(win.eventdata.targetUserName) by $(win.eventdata.subjectUserName) — member: $(win.eventdata.memberName)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>account_changed,group_changed,</group>
+  </rule>
+
+  <!-- Member removed from Global Security Group -->
+  <rule id="100313" level="8">
+    <if_sid>60142</if_sid>
+    <field name="win.system.eventID">^4729$</field>
+    <options>no_full_log</options>
+    <description>AD: Member removed from global security group $(win.eventdata.targetUserName) by $(win.eventdata.subjectUserName) — member: $(win.eventdata.memberName)</description>
+    <group>account_changed,group_changed,</group>
+  </rule>
+
+  <!-- Member removed from Local Security Group -->
+  <rule id="100314" level="8">
+    <if_sid>60145</if_sid>
+    <field name="win.system.eventID">^4733$</field>
+    <options>no_full_log</options>
+    <description>AD: Member removed from local security group $(win.eventdata.targetUserName) by $(win.eventdata.subjectUserName) — member: $(win.eventdata.memberName)</description>
+    <group>account_changed,group_changed,</group>
+  </rule>
+
+  <!-- Member removed from Universal Security Group -->
+  <rule id="100315" level="8">
+    <if_sid>60152</if_sid>
+    <field name="win.system.eventID">^4757$</field>
+    <options>no_full_log</options>
+    <description>AD: Member removed from universal security group $(win.eventdata.targetUserName) by $(win.eventdata.subjectUserName) — member: $(win.eventdata.memberName)</description>
+    <group>account_changed,group_changed,</group>
+  </rule>
+
+  <!-- Rapid group membership changes — possible privilege escalation -->
+  <rule id="100316" level="14" frequency="4" timeframe="120">
+    <if_matched_sid>100310</if_matched_sid>
+    <same_field>win.eventdata.subjectUserName</same_field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>AD: Rapid group membership additions by same admin — possible privilege escalation</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>account_changed,group_changed,privilege_escalation,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 3 — Privilege Use & Special Logon
+       No default rule matches 4672 or 4670 — left under 60103.
+       ============================================================ -->
+
+  <!-- Special Privileges Assigned to New Logon -->
+  <!-- 4672 fires on every privileged/SYSTEM/service logon (very high volume), so
+       machine and well-known service principals are excluded — this now flags only
+       interactive privileged-USER logons. -->
+  <rule id="100320" level="6">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4672$</field>
+    <field name="win.eventdata.subjectUserName" negate="yes" type="pcre2">\$$|(?i)^SYSTEM$|^LOCAL SERVICE$|^NETWORK SERVICE$</field>
+    <options>no_full_log</options>
+    <description>AD: Special privileges assigned to logon — $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>privilege_escalation,special_logon,</group>
+  </rule>
+
+  <!-- Permissions on Object Changed -->
+  <rule id="100321" level="8">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4670$</field>
+    <options>no_full_log</options>
+    <description>AD: Permissions changed on object by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1222</id>
+    </mitre>
+    <group>policy_changed,permissions_changed,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 4 — Logon / Logoff Anomalies
+       No default rule matches 4648 — left under 60103.
+       ============================================================ -->
+
+  <!-- Explicit Credential Logon (RunAs / credential harvesting indicator) -->
+  <rule id="100322" level="6">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4648$</field>
+    <field name="win.eventdata.subjectDomainName" negate="yes" type="pcre2">(?i)^NT SERVICE$|^NT AUTHORITY$|^Window Manager$|^Font Driver Host$</field>
+    <field name="win.eventdata.subjectUserName" negate="yes" type="pcre2">\$$</field>
+    <options>no_full_log</options>
+    <description>AD: Explicit credential logon - $(win.eventdata.subjectUserName) used creds of $(win.eventdata.targetUserName) to $(win.eventdata.targetServerName)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>authentication_success,lateral_movement,</group>
+  </rule>
+
+  <!-- Multiple explicit-credential logons — lateral movement indicator -->
+  <rule id="100323" level="13" frequency="5" timeframe="180">
+    <if_matched_sid>100322</if_matched_sid>
+    <same_field>win.eventdata.subjectUserName</same_field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>AD: Multiple explicit-credential logons by $(win.eventdata.subjectUserName) — possible lateral movement</description>
+    <mitre>
+      <id>T1021</id>
+    </mitre>
+    <group>lateral_movement,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 5 — Attack Detection (Kerberoasting, DCSync)
+
+       100331 correlates on 110002 (Kerberoasting base rule in
+       local_rules.xml). 110002 was itself silenced (it sat under 60103
+       as a sibling of 60106, which matches 4769); it has now been
+       re-parented to 60106, so 110002 fires and this correlation works.
+
+       100332 (DCSync via 4662): no default rule matches 4662, so it
+       fires correctly under 60103 — left unchanged.
+       ============================================================ -->
+
+  <!-- Kerberoasting in Progress: Burst of RC4 TGS requests from same IP -->
+  <!-- FIX 2026-07-11 (validated by pentest): was if_matched_sid 110002, but
+       110002 requires ticketOptions == 0x40810000 and impacket's GetUserSPNs
+       sends a different value, so 110002 never fires and this burst had no
+       feeder. Re-pointed to 100360 (the RC4-TGS catch-all in 103-local_rules,
+       which fired 10/10 in testing). Single RC4 tickets stay digest-only via
+       100360; a burst of 8+ from one source escalates to this real-time alert. -->
+  <rule id="100331" level="14" frequency="8" timeframe="120">
+    <if_matched_sid>100360</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <options>no_full_log</options>
+    <description>AD: Kerberoasting in progress — multiple RC4 TGS requests from same source</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+    <group>attack,credential_theft,kerberoasting,</group>
+  </rule>
+
+  <!-- DCSync Attack: Replication Rights Used -->
+  <rule id="100332" level="15">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4662$</field>
+    <field name="win.eventdata.properties" type="pcre2">1131f6aa|1131f6ad|89e95b76</field>
+    <field name="win.eventdata.subjectUserName" negate="yes" type="pcre2">\$$|^MSOL_|^AAD_|^ADSync|^Azure AD Sync</field>
+    <options>no_full_log</options>
+    <description>AD: DCSync attack - replication rights used by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1003.006</id>
+    </mitre>
+    <group>attack,credential_theft,dcsync,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 6 — Process Creation (Offensive Tooling)
+
+       Native Windows Security Event 4688 (Process Creation). No default
+       rule matches 4688, so these fire correctly under 60103 — unchanged.
+
+       REQUIRES: GPO "Audit Process Creation" = Enabled AND "Include
+       command line in process creation events" = Enabled. (If neither
+       4688 nor Sysmon EID 1 is being collected, these stay dormant by
+       design — verify with logtest using a sample 4688 event.)
+       ============================================================ -->
+
+  <!-- Known Offensive Tool Executed -->
+  <rule id="100340" level="15">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4688$</field>
+    <field name="win.eventdata.newProcessName" type="pcre2">(?i)mimikatz|rubeus|bloodhound|sharphound|lazagne|crackmapexec|impacket</field>
+    <options>no_full_log</options>
+    <description>AD: Known offensive tool executed on $(win.system.computer) — $(win.eventdata.newProcessName)</description>
+    <mitre>
+      <id>T1003</id>
+    </mitre>
+    <group>attack,credential_theft,process_creation,</group>
+  </rule>
+
+  <!-- net.exe / net1.exe Execution -->
+  <!-- net.exe is ubiquitous (net use / net time in logon scripts), so the single
+       execution is low-signal (L4); the real detection is the burst rule 100342. -->
+  <rule id="100341" level="4">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4688$</field>
+    <field name="win.eventdata.newProcessName">\\net\.exe$|\\net1\.exe$</field>
+    <options>no_full_log</options>
+    <description>AD: net.exe execution detected on $(win.system.computer) by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1087.002</id>
+    </mitre>
+    <group>attack,reconnaissance,process_creation,</group>
+  </rule>
+
+  <!-- Burst of net.exe from same user — enumeration/recon -->
+  <rule id="100342" level="13" frequency="4" timeframe="60">
+    <if_matched_sid>100341</if_matched_sid>
+    <same_field>win.eventdata.subjectUserName</same_field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>AD: Repeated net.exe usage by $(win.eventdata.subjectUserName) — possible enumeration</description>
+    <mitre>
+      <id>T1087.002</id>
+    </mitre>
+    <group>attack,reconnaissance,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 7 — GPO & Policy Changes
+       ============================================================ -->
+
+  <!-- Group Policy / Directory Object Modified (default 60229 matches 5136) -->
+  <!-- FIX 2026-07-03: negate AdminSDHolder so this generic 5136 rule does not
+       shadow the specific AdminSDHolder detection 100359 below (both are
+       children of 60229; siblings match by load order and this one is defined
+       first, so without the negation it swallowed every 5136 incl. AdminSDHolder). -->
+  <rule id="100350" level="10">
+    <if_sid>60229</if_sid>
+    <field name="win.system.eventID">^5136$</field>
+    <field name="win.eventdata.objectDN" negate="yes" type="pcre2">(?i)AdminSDHolder</field>
+    <options>no_full_log</options>
+    <description>AD: Directory object modified — $(win.eventdata.objectDN) by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1484.001</id>
+    </mitre>
+    <group>policy_changed,gpo_changed,</group>
+  </rule>
+
+  <!-- Audit Policy Changed — 60112 (103-local_rules.xml) is overwritten to
+       level=0 so only these specific custom rules generate alerts.
+       4907/4912 coverage added here so 60112 can be safely silenced. -->
+  <rule id="100351" level="12">
+    <if_sid>60112</if_sid>
+    <field name="win.system.eventID">^4719$</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>AD: System audit policy changed by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1562.002</id>
+    </mitre>
+    <group>policy_changed,audit_policy_changed,defense_evasion,</group>
+  </rule>
+
+  <rule id="100362" level="8">
+    <if_sid>60112</if_sid>
+    <field name="win.system.eventID">^4907$</field>
+    <options>no_full_log</options>
+    <description>AD: Auditing settings on object changed by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1562.002</id>
+    </mitre>
+    <group>policy_changed,audit_policy_changed,</group>
+  </rule>
+
+  <rule id="100363" level="8">
+    <if_sid>60112</if_sid>
+    <field name="win.system.eventID">^4912$</field>
+    <options>no_full_log</options>
+    <description>AD: Per-user audit policy changed by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1562.002</id>
+    </mitre>
+    <group>policy_changed,audit_policy_changed,</group>
+  </rule>
+
+  <!-- Security Log Cleared — cover tracks.
+       FIX 2026-07-03: re-parented 60117 -> 63103. Traced against the shipped
+       ruleset + the embedded 1102 sample: event 1102 arrives on channel/provider
+       "Microsoft-Windows-Eventlog" and routes 60001 -> 60017 (provider group,
+       loaded first) -> 63108 -> 63103 "audit log was cleared" (level 5). It
+       NEVER reaches 60117 (which sits under the 60100 severity branch), so the
+       old parent made this rule dead. 63103 is the rule that actually fires for
+       1102, so chaining under it escalates the real event to level 14. -->
+  <rule id="100352" level="14">
+    <if_sid>63103</if_sid>
+    <field name="win.system.eventID">^1102$</field>
+    <options>no_full_log</options>
+    <description>AD: Security event log cleared on $(win.system.computer) — possible evidence destruction</description>
+    <mitre>
+      <id>T1070.001</id>
+    </mitre>
+    <group>defense_evasion,log_cleared,</group>
+  </rule>
+
+  <!-- PsExec activity (4688 — no default rule; unchanged) -->
+  <rule id="100343" level="13">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4688$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(\\PSEXESVC\.exe|\\PsExec(64)?\.exe.*\\\\)</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>AD: PsExec activity on $(win.system.computer) - $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1021.002</id>
+      <id>T1569.002</id>
+    </mitre>
+    <group>attack,lateral_movement,process_creation,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 8 — New High-Value Detections
+       ============================================================ -->
+
+  <!-- Renamed offensive tool via original PE filename.
+       FIX 2026-07-03: re-parented 60103/4688 -> 61603 (Sysmon Event 1: Process
+       creation). Security event 4688 does NOT carry OriginalFileName — that
+       field only exists on Sysmon EID 1 — so on the old parent this rule could
+       never fire. The originalFileName match itself is correct for Sysmon.
+       DEPENDENCY: requires Sysmon deployed on the host with EID 1 logging. If
+       Sysmon is not in use these hosts have no OriginalFileName source at all;
+       the name-based rule 100340 (4688 newProcessName) remains the fallback.
+       Verify Sysmon coverage before relying on this. -->
+  <rule id="100354" level="15">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)mimikatz\.exe|rubeus\.exe|sharphound\.exe|lazagne\.exe|crackmapexec\.exe</field>
+    <options>no_full_log</options>
+    <description>AD: Known offensive tool PE signature detected (originalFileName) — $(win.eventdata.originalFileName) run by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1003</id>
+    </mitre>
+    <group>attack,credential_theft,process_creation,</group>
+  </rule>
+
+  <!-- 4697 — new service installed. No default Wazuh rule covers this EID.
+       Machine accounts excluded; SYSTEM service installs are expected noise. -->
+  <rule id="100355" level="11">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4697$</field>
+    <field name="win.eventdata.subjectUserName" negate="yes" type="pcre2">\$$</field>
+    <options>no_full_log</options>
+    <description>AD: New service installed — $(win.eventdata.serviceName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1543.003</id>
+    </mitre>
+    <group>persistence,service_creation,</group>
+  </rule>
+
+  <!-- 4776 — NTLM credential validation on DC. No default Wazuh rule covers this EID.
+       A burst of 4776 events from same workstation across different users = NTLM spray / PtH indicator. -->
+  <!-- 4776 fires on every NTLM validation on the DC (high volume) — kept as a L3
+       feeder for the spray correlation 100364 below, not an alert on its own. -->
+  <!-- FIX 2026-07-03: (a) parent 60103 -> 60103,60104 so NTLM validation
+       FAILURES (severityValue AUDIT_FAILURE, the ones a spray actually
+       generates) are also fed, not just successes; (b) field is
+       win.eventdata.workstation, NOT workstationName — 4776's EventData field
+       is "Workstation" (4624/4625 use "WorkstationName"; different events).
+       Confirm the field name with wazuh-logtest on a real 4776. -->
+  <rule id="100356" level="2">
+    <if_sid>60103,60104</if_sid>
+    <field name="win.system.eventID">^4776$</field>
+    <!-- FIX 2026-07-07: only FAILED validations feed the spray correlation 100364.
+         4776 status 0x0 = success (normal auth, very high volume on a DC);
+         0xC0000xxx = failure (bad password / unknown user / locked = what a spray
+         actually generates). Without this filter a busy host's normal SUCCESSFUL
+         NTLM logons trip the L12 rule 100364 - the false positive being seen. -->
+    <field name="win.eventdata.status" type="pcre2">(?i)^0xC0000</field>
+    <field name="win.eventdata.targetUserName" negate="yes" type="pcre2">\$$</field>
+    <options>no_full_log</options>
+    <description>AD: NTLM credential validation failed — $(win.eventdata.targetUserName) from $(win.eventdata.workstation) (status $(win.eventdata.status))</description>
+    <mitre>
+      <id>T1110.003</id>
+      <id>T1550.002</id>
+    </mitre>
+    <group>authentication,authentication_failed,ntlm,</group>
+  </rule>
+
+  <!-- 4776 burst from the same workstation = NTLM password spray / brute force
+       (the correlation the 100356 comment promised). Many NTLM validations from
+       one source host in a short window is the spray indicator. -->
+  <rule id="100364" level="12" frequency="10" timeframe="120">
+    <if_matched_sid>100356</if_matched_sid>
+    <same_field>win.eventdata.workstation</same_field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>AD: Possible NTLM password spray — 10+ FAILED NTLM validations from $(win.eventdata.workstation)</description>
+    <mitre>
+      <id>T1110.003</id>
+      <id>T1550.002</id>
+    </mitre>
+    <group>attack,authentication,ntlm,brute_force,password_spray,</group>
+  </rule>
+
+  <!-- 4698 — scheduled task created by non-system account.
+       Parent 60228 is the default L4 rule for 4698 in 0580-win-security_rules.xml.
+       SYSTEM / LOCAL SERVICE / NETWORK SERVICE and machine accounts are excluded. -->
+  <rule id="100357" level="10">
+    <if_sid>60228</if_sid>
+    <field name="win.system.eventID">^4698$</field>
+    <field name="win.eventdata.subjectUserName" negate="yes" type="pcre2">(?i)^SYSTEM$|^LOCAL SERVICE$|^NETWORK SERVICE$|\$$</field>
+    <options>no_full_log</options>
+    <description>AD: Scheduled task created by $(win.eventdata.subjectUserName) — $(win.eventdata.taskName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1053.005</id>
+    </mitre>
+    <group>persistence,scheduled_task,</group>
+  </rule>
+
+  <!-- 5136 — AdminSDHolder object modification.
+       AdminSDHolder tampering grants persistent privileged access via SDProp.
+       Parent 60229 is the level=0 overwrite in 103-local_rules.xml; level=0
+       parents still route events to children. -->
+  <rule id="100359" level="15">
+    <if_sid>60229</if_sid>
+    <field name="win.system.eventID">^5136$</field>
+    <field name="win.eventdata.objectDN" type="pcre2">(?i)AdminSDHolder</field>
+    <options>no_full_log</options>
+    <description>AD: AdminSDHolder object modified — SDProp persistence by $(win.eventdata.subjectUserName)</description>
+    <mitre>
+      <id>T1484.001</id>
+    </mitre>
+    <group>attack,persistence,ad_persistence,</group>
+  </rule>
+
+  <!-- 4673 SUCCESS — sensitive privilege actually exercised.
+       Default rule 60107 covers 4673 FAILURE (if_sid 60104). This rule covers
+       SUCCESS events (if_sid 60103) for high-value privileges only.
+       SYSTEM and machine accounts excluded as expected callers. -->
+  <rule id="100361" level="10">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4673$</field>
+    <field name="win.eventdata.privilegeList" type="pcre2">(?i)SeDebugPrivilege|SeTcbPrivilege|SeAssignPrimaryTokenPrivilege</field>
+    <field name="win.eventdata.subjectUserName" negate="yes" type="pcre2">\$$|(?i)^SYSTEM$</field>
+    <options>no_full_log</options>
+    <description>AD: Sensitive privilege exercised — $(win.eventdata.privilegeList) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1134</id>
+    </mitre>
+    <group>privilege_escalation,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 9 — Tier-0 Privileged Group Membership (CROWN JEWELS)
+
+       PROBLEM SOLVED: Adding a user to Domain Admins fires default rule
+       60159 (L12). Likewise 60154 (Builtin\Administrators), 60166 (Schema
+       Admins), 60167 (Enterprise Admins). Those default rules are CHILDREN
+       of 60141/60144/60151 and load BEFORE this file, so they win the
+       sibling race for these exact SIDs — any NEW custom rule chained off
+       60141/60144/60151 for the same SID would be SHADOWED and never fire.
+
+       RESOLUTION = Outcome C (overwrite in place). We keep the default IDs
+       (60159/60154/60166/60167) and re-author them here with overwrite="yes":
+       same stable SID/RID match, enriched description (actor + added member),
+       and correct MITRE (T1098 Account Manipulation, T1078.002 Domain
+       Accounts). overwrite REPLACES the rule outright, so there is no race —
+       our enriched version is the only definition that exists at load time.
+
+       SID-vs-NAME tradeoff: group NAME (targetUserName) can be renamed or
+       localized; the RID is immutable. We match the RID via targetSid
+       (primary) and ALSO provide a NAME-based safety-net sibling for each
+       group in case targetSid is ever absent from the decoded event. Per
+       this environment's field quirks, memberName/memberSid are used in
+       descriptions ONLY (unreliable for match logic), never in conditions.
+       ============================================================ -->
+
+  <!-- Domain Admins (GLOBAL group, RID 512) — EID 4728, parent 60141.
+       Overwrites default 60159 (was: bare "Domain Admins Group Changed"). -->
+  <rule id="60159" level="12" overwrite="yes">
+    <if_sid>60141,60142</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-\S+-512$</field>
+    <options>no_full_log</options>
+    <description>AD CROWN-JEWEL: Domain Admins membership changed — group $(win.eventdata.targetUserName), member $(win.eventdata.memberName) ($(win.eventdata.memberSid)) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <!-- Builtin\Administrators (DOMAIN-LOCAL group, S-1-5-32-544) — EID 4732,
+       parent 60144. Overwrites default 60154. -->
+  <rule id="60154" level="12" overwrite="yes">
+    <if_sid>60144,60145</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-32-544$</field>
+    <options>no_full_log</options>
+    <description>AD CROWN-JEWEL: Builtin\Administrators membership changed — group $(win.eventdata.targetUserName), member $(win.eventdata.memberName) ($(win.eventdata.memberSid)) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <!-- Schema Admins (UNIVERSAL group, RID 518) — EID 4756, parent 60151.
+       Overwrites default 60166. -->
+  <rule id="60166" level="12" overwrite="yes">
+    <if_sid>60149,60150,60151,60152</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-\S+-518$</field>
+    <options>no_full_log</options>
+    <description>AD CROWN-JEWEL: Schema Admins membership changed — group $(win.eventdata.targetUserName), member $(win.eventdata.memberName) ($(win.eventdata.memberSid)) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <!-- Enterprise Admins (UNIVERSAL group, RID 519) — EID 4756, parent 60151.
+       Overwrites default 60167. -->
+  <rule id="60167" level="12" overwrite="yes">
+    <if_sid>60149,60150,60151,60152</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-\S+-519$</field>
+    <options>no_full_log</options>
+    <description>AD CROWN-JEWEL: Enterprise Admins membership changed — group $(win.eventdata.targetUserName), member $(win.eventdata.memberName) ($(win.eventdata.memberSid)) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <!-- NAME-based safety net (RID absent / decoder gap). New custom IDs in a
+       free slice of the AD range (100344-100347). These chain off the same
+       per-scope parents and match the GROUP NAME (targetUserName, pcre2 (?i)
+       to survive case/localization variance) while EXCLUDING the SID-matched
+       case via negate, so they only fire when the primary SID rule did NOT.
+       They will not double-alert with 60159/60154/60166/60167 because those
+       siblings load first and consume the event when targetSid is present. -->
+
+  <!-- Domain Admins by NAME (fallback) -->
+  <rule id="100344" level="12">
+    <if_sid>60141</if_sid>
+    <field name="win.system.eventID">^4728$</field>
+    <field name="win.eventdata.targetSid" negate="yes">^S-1-5-\S+-512$</field>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^Domain Admins$</field>
+    <options>no_full_log</options>
+    <description>AD CROWN-JEWEL (name-match): Domain Admins membership changed — member $(win.eventdata.memberName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <!-- Builtin\Administrators by NAME (fallback) -->
+  <rule id="100345" level="12">
+    <if_sid>60144</if_sid>
+    <field name="win.system.eventID">^4732$</field>
+    <field name="win.eventdata.targetSid" negate="yes">^S-1-5-32-544$</field>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^Administrators$|^Administratoren$|^Administrateurs$</field>
+    <options>no_full_log</options>
+    <description>AD CROWN-JEWEL (name-match): Builtin\Administrators membership changed — member $(win.eventdata.memberName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <!-- Schema Admins by NAME (fallback) -->
+  <rule id="100346" level="12">
+    <if_sid>60151</if_sid>
+    <field name="win.system.eventID">^4756$</field>
+    <field name="win.eventdata.targetSid" negate="yes">^S-1-5-\S+-518$</field>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^Schema Admins$</field>
+    <options>no_full_log</options>
+    <description>AD CROWN-JEWEL (name-match): Schema Admins membership changed — member $(win.eventdata.memberName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <!-- Enterprise Admins by NAME (fallback) -->
+  <rule id="100347" level="12">
+    <if_sid>60151</if_sid>
+    <field name="win.system.eventID">^4756$</field>
+    <field name="win.eventdata.targetSid" negate="yes">^S-1-5-\S+-519$</field>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^Enterprise Admins$</field>
+    <options>no_full_log</options>
+    <description>AD CROWN-JEWEL (name-match): Enterprise Admins membership changed — member $(win.eventdata.memberName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+</group>

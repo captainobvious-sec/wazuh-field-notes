@@ -1,0 +1,671 @@
+<group name="windows,powershell,ad_recon,">
+
+  <!-- ============================================================
+       SECTION 1 — Basic System Reconnaissance
+       These are the first commands attackers run after initial access
+       ============================================================ -->
+
+  <!-- whoami variants - identity discovery -->
+  <rule id="100400" level="4">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)whoami</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Identity discovery via whoami on $(win.system.computer) by $(win.eventdata.path)</description>
+    <mitre>
+      <id>T1033</id>
+    </mitre>
+    <group>recon,discovery,</group>
+  </rule>
+
+  <!-- System info gathering -->
+  <rule id="100401" level="4">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)systeminfo|Get-ComputerInfo|Get-WmiObject\s+Win32_ComputerSystem|Get-CimInstance\s+Win32_ComputerSystem</field>
+    <options>no_full_log</options>
+    <description>PS Recon: System information gathering on $(win.system.computer)</description>
+    <mitre>
+      <id>T1082</id>
+    </mitre>
+    <group>recon,discovery,</group>
+  </rule>
+
+  <!-- Network configuration discovery -->
+  <rule id="100402" level="4">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)ipconfig|Get-NetIPAddress|Get-NetIPConfiguration|Get-NetAdapter</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Network configuration discovery on $(win.system.computer)</description>
+    <mitre>
+      <id>T1016</id>
+    </mitre>
+    <group>recon,discovery,network_recon,</group>
+  </rule>
+
+  <!-- Running process enumeration -->
+  <rule id="100403" level="4">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-Process|tasklist|Get-WmiObject\s+Win32_Process|Get-CimInstance\s+Win32_Process</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Running process enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1057</id>
+    </mitre>
+    <group>recon,discovery,</group>
+  </rule>
+
+  <!-- Installed software enumeration -->
+  <rule id="100404" level="4">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-WmiObject\s+Win32_Product|Get-ItemProperty\s+HKLM.*Uninstall|winrm enumerate</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Installed software enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1518</id>
+    </mitre>
+    <group>recon,discovery,</group>
+  </rule>
+
+  <!-- Local user and group enumeration -->
+  <rule id="100405" level="4">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-LocalUser|Get-LocalGroup|Get-LocalGroupMember|net localgroup|net user</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Local user/group enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1087.001</id>
+    </mitre>
+    <group>recon,discovery,account_discovery,</group>
+  </rule>
+
+  <!-- Open ports and network connections -->
+  <rule id="100406" level="4">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-NetTCPConnection|Get-NetUDPEndpoint|netstat</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Network connection/port enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1049</id>
+    </mitre>
+    <group>recon,discovery,network_recon,</group>
+  </rule>
+
+  <!-- Scheduled tasks enumeration -->
+  <rule id="100407" level="4">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ScheduledTask|schtasks</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Scheduled task enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1053.005</id>
+    </mitre>
+    <group>recon,discovery,</group>
+  </rule>
+
+  <!-- Services enumeration -->
+  <rule id="100408" level="4">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-Service|sc query|Get-WmiObject\s+Win32_Service|Get-CimInstance\s+Win32_Service</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Windows service enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1007</id>
+    </mitre>
+    <group>recon,discovery,</group>
+  </rule>
+
+  <!-- Active host reconnaissance: a burst of distinct discovery commands from one
+       host in a short window. Compensates for 100400-100408 being lowered to L4 —
+       a single discovery command is low-signal, but many in 2 minutes is not.
+       Composite (if_matched_group), so the L4 base levels still feed it. -->
+  <rule id="100409" level="10" frequency="6" timeframe="120">
+    <if_matched_group>discovery</if_matched_group>
+    <same_field>win.system.computer</same_field>
+    <options>no_full_log</options>
+    <description>PS Recon: Active host reconnaissance — multiple discovery commands on $(win.system.computer)</description>
+    <mitre>
+      <id>T1082</id>
+    </mitre>
+    <group>recon,reconnaissance_burst,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 2 — Active Directory Enumeration
+       High value targets - attackers map AD before moving laterally
+       ============================================================ -->
+
+  <!-- AD user enumeration -->
+  <rule id="100410" level="10">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADUser|Get-ADObject|\[adsisearcher\]</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Active Directory user enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1087.002</id>
+    </mitre>
+    <group>recon,discovery,ad_enumeration,</group>
+  </rule>
+
+  <!-- AD group enumeration -->
+  <rule id="100411" level="10">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADGroup|Get-ADGroupMember|Get-ADPrincipalGroupMembership</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Active Directory group enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1069.002</id>
+    </mitre>
+    <group>recon,discovery,ad_enumeration,</group>
+  </rule>
+
+  <!-- AD computer enumeration -->
+  <rule id="100412" level="10">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADComputer|Get-ADDomainController|Get-ADDomain|Get-ADForest</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Active Directory domain/computer enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1018</id>
+    </mitre>
+    <group>recon,discovery,ad_enumeration,</group>
+  </rule>
+
+  <!-- AD trust enumeration -->
+  <rule id="100413" level="10">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADTrust|nltest /domain_trusts|Get-NetDomainTrust</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Active Directory trust enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1482</id>
+    </mitre>
+    <group>recon,discovery,ad_enumeration,</group>
+  </rule>
+
+  <!-- SPN / Kerberoastable account enumeration -->
+  <rule id="100414" level="12">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADUser.*ServicePrincipalName|setspn|KerberosRequestorSecurityToken|Request-SPNTicket</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Recon: SPN / Kerberoastable account enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+    <group>recon,discovery,ad_enumeration,kerberoasting,</group>
+  </rule>
+
+  <!-- GPO and OU enumeration -->
+  <rule id="100415" level="10">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-GPO|Get-ADOU|Get-ADOrganizationalUnit|Get-GPPermission|gpresult</field>
+    <options>no_full_log</options>
+    <description>PS Recon: GPO / OU structure enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1615</id>
+    </mitre>
+    <group>recon,discovery,ad_enumeration,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 3 — Network Reconnaissance
+       ============================================================ -->
+
+  <!-- Network share enumeration -->
+  <rule id="100420" level="10">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-SmbShare|Get-WmiObject\s+Win32_Share|net share|net view</field>
+    <options>no_full_log</options>
+    <description>PS Recon: Network share enumeration on $(win.system.computer)</description>
+    <mitre>
+      <id>T1135</id>
+    </mitre>
+    <group>recon,discovery,network_recon,</group>
+  </rule>
+
+  <!-- Port scanning -->
+  <rule id="100421" level="12">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Invoke-Portscan|1\.\.1024|foreach.*TcpClient</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Recon: Port scanning activity detected on $(win.system.computer)</description>
+    <mitre>
+      <id>T1046</id>
+    </mitre>
+    <group>recon,discovery,network_recon,port_scan,</group>
+  </rule>
+
+  <!-- DNS reconnaissance -->
+  <rule id="100422" level="8">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Resolve-DnsName|nslookup|\[System\.Net\.Dns\]</field>
+    <options>no_full_log</options>
+    <description>PS Recon: DNS reconnaissance on $(win.system.computer)</description>
+    <mitre>
+      <id>T1018</id>
+    </mitre>
+    <group>recon,discovery,network_recon,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 4 — Credential Access
+       ============================================================ -->
+
+  <!-- Registry credential hunting -->
+  <rule id="100430" level="13">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)HKLM.*password|HKCU.*password|reg query.*password|Get-ItemProperty.*password</field>
+    <options>no_full_log</options>
+    <description>PS Attack: Registry credential search on $(win.system.computer)</description>
+    <mitre>
+      <id>T1552.002</id>
+    </mitre>
+    <group>attack,credential_theft,</group>
+  </rule>
+
+  <!-- LSASS access attempts -->
+  <rule id="100431" level="14">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)lsass|sekurlsa|Out-Minidump|MiniDumpWriteDump|procdump</field>
+    <options>no_full_log</options>
+    <description>PS Attack: LSASS memory access / credential dump attempt on $(win.system.computer)</description>
+    <mitre>
+      <id>T1003.001</id>
+    </mitre>
+    <group>attack,credential_theft,</group>
+  </rule>
+
+  <!-- SAM/NTDS credential dumping.
+       NOTE (2026-07-08): email demoted to digest here because the `vssadmin`
+       alternation fires on every backup job (FP). The unambiguous half
+       (ntds.dit / reg save sam|system) is split into Tier-1 child 100607 in
+       107-alert_tuning_windows.xml, which keeps emailing. -->
+  <rule id="100432" level="14">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)ntds.dit|sam.*system|reg save.*sam|reg save.*system|vssadmin</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Attack: SAM/NTDS credential dump attempt on $(win.system.computer)</description>
+    <mitre>
+      <id>T1003.002</id>
+    </mitre>
+    <group>attack,credential_theft,</group>
+  </rule>
+
+  <!-- Credential files search -->
+  <rule id="100433" level="12">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ChildItem.*password|Select-String.*password|findstr.*password|Get-Content.*unattend</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Attack: Credential file search on $(win.system.computer)</description>
+    <mitre>
+      <id>T1552.001</id>
+    </mitre>
+    <group>attack,credential_theft,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 5 — Defense Evasion
+       ============================================================ -->
+
+  <!-- Disabling Windows Defender.
+       NOTE (2026-07-08): email demoted (exclusion/preference management is
+       routine endpoint admin). Hard-kill patterns (DisableRealtimeMonitoring
+       / tamper-protection off) are split into Tier-1 child 100605 in
+       107-alert_tuning_windows.xml. -->
+  <rule id="100440" level="14">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Set-MpPreference|Disable-WindowsOptionalFeature|Add-MpPreference.*ExclusionPath|Set-MpPreference.*DisableRealtimeMonitoring</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Attack: Windows Defender tampering on $(win.system.computer)</description>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+    <group>attack,defense_evasion,</group>
+  </rule>
+
+  <!-- Clearing event logs.
+       NOTE (2026-07-08): email demoted. A SUCCESSFUL clear raises 1102, which
+       fires the Tier-1 rule 100352; the PS attempt alone is digest material. -->
+  <rule id="100441" level="14">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Clear-EventLog|wevtutil.*cl|Remove-EventLog|Limit-EventLog</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Attack: Event log clearing on $(win.system.computer)</description>
+    <mitre>
+      <id>T1070.001</id>
+    </mitre>
+    <group>attack,defense_evasion,log_cleared,</group>
+  </rule>
+
+  <!-- AMSI bypass attempts -->
+  <rule id="100442" level="15">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)amsiInitFailed|AmsiScanBuffer|amsi.dll|Bypass-AMSI|amsiContext</field>
+    <options>no_full_log</options>
+    <description>PS Attack: AMSI bypass attempt on $(win.system.computer)</description>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+    <group>attack,defense_evasion,amsi_bypass,</group>
+  </rule>
+
+  <!-- Execution policy bypass -->
+  <rule id="100443" level="10">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Set-ExecutionPolicy Bypass|Set-ExecutionPolicy Unrestricted|ExecutionPolicy Bypass</field>
+    <options>no_full_log</options>
+    <description>PS Attack: PowerShell execution policy bypass on $(win.system.computer)</description>
+    <mitre>
+      <id>T1059.001</id>
+    </mitre>
+    <group>attack,defense_evasion,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 6 — Persistence
+       ============================================================ -->
+
+  <!-- Scheduled task creation -->
+  <rule id="100450" level="12">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Register-ScheduledTask|New-ScheduledTask|schtasks.*create</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Persistence: Scheduled task creation on $(win.system.computer)</description>
+    <mitre>
+      <id>T1053.005</id>
+    </mitre>
+    <group>attack,persistence,</group>
+  </rule>
+
+  <!-- Registry run key persistence -->
+  <rule id="100451" level="12">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)HKLM.*Run|HKCU.*Run|New-ItemProperty.*CurrentVersion.*Run|Set-ItemProperty.*CurrentVersion.*Run</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Persistence: Registry run key modification on $(win.system.computer)</description>
+    <mitre>
+      <id>T1547.001</id>
+    </mitre>
+    <group>attack,persistence,</group>
+  </rule>
+
+  <!-- WMI event subscription persistence -->
+  <rule id="100452" level="13">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)New-CimInstance.*__EventFilter|New-CimInstance.*__EventConsumer|New-CimInstance.*__FilterToConsumerBinding|Set-WmiInstance.*__EventFilter</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Persistence: WMI event subscription created on $(win.system.computer)</description>
+    <mitre>
+      <id>T1546.003</id>
+    </mitre>
+    <group>attack,persistence,wmi_persistence,</group>
+  </rule>
+
+  <!-- ============================================================
+       SECTION 7 — Lateral Movement
+       ============================================================ -->
+
+  <!-- Remote execution via WMI -->
+  <rule id="100460" level="12">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Invoke-WmiMethod|Get-WmiObject.*-ComputerName|Invoke-CimMethod.*-ComputerName</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Lateral Movement: Remote WMI execution from $(win.system.computer)</description>
+    <mitre>
+      <id>T1047</id>
+    </mitre>
+    <group>attack,lateral_movement,</group>
+  </rule>
+
+  <!-- Remote execution via PSRemoting -->
+  <rule id="100461" level="12">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Invoke-Command.*-ComputerName|New-PSSession|Enter-PSSession|New-CimSession.*-ComputerName</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Lateral Movement: PSRemoting / remote session from $(win.system.computer)</description>
+    <mitre>
+      <id>T1021.006</id>
+    </mitre>
+    <group>attack,lateral_movement,</group>
+  </rule>
+
+  <!-- Pass-the-hash / token manipulation -->
+  <rule id="100462" level="14">
+    <if_sid>91802</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Invoke-TokenManipulation|Invoke-RunAs|Add-ObjectAcl|Invoke-ACLScanner</field>
+    <options>no_full_log</options>
+    <description>PS Attack: Token manipulation / ACL abuse on $(win.system.computer)</description>
+    <mitre>
+      <id>T1134</id>
+    </mitre>
+    <group>attack,lateral_movement,privilege_escalation,</group>
+  </rule>
+
+</group>
+
+<!-- ============================================================
+     PowerShell Module Logging (Event ID 4103) — custom rules
+     IDs 100470-100499
+
+     CONSOLIDATED 2026-07-08: these 4103 module-logging rules were merged INTO
+     this file (per operator preference for a single PowerShell rule file). The
+     former separate file 106-ps_module_logging_windows.xml has been emptied so
+     the IDs 100470-100485 are declared exactly once. 4104 script-block rules are
+     above (100400-100462); 4103 cmdlet/pipeline rules are below and carry the
+     invoking user SID ($(win.system.securityUserID)).
+
+     Routing (2026-07-08): 100472 PROMOTED to email (alert_by_email);
+     100473/100477/100479/100485 DEMOTED to digest (no_email_alert). The Defender
+     hard-kill child of 100477 that stays Tier-1 is 100606 in 107-alert_tuning.
+     ============================================================ -->
+<group name="windows,powershell,module_logging,">
+
+  <!-- ===================== base router ===================== -->
+  <rule id="100470" level="0">
+    <if_sid>91801</if_sid>
+    <field name="win.system.eventID">^4103$</field>
+    <options>no_full_log</options>
+    <description>PS Module: pipeline execution logged (4103) on $(win.system.computer)</description>
+    <group>powershell_module,</group>
+  </rule>
+
+  <!-- ===================== recon / discovery ===================== -->
+
+  <!-- Native AD RSAT cmdlet enumeration -->
+  <rule id="100471" level="8">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)\bGet-AD(User|Group|Computer|GroupMember|Domain|DomainController|Trust|Object|ServiceAccount|OrganizationalUnit|DefaultDomainPasswordPolicy)\b</field>
+    <options>no_full_log</options>
+    <description>PS Module Recon: AD enumeration cmdlet by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1087.002</id>
+    </mitre>
+    <group>recon,discovery,ad_enumeration,</group>
+  </rule>
+
+  <!-- PowerView / offensive domain recon toolkit -->
+  <rule id="100472" level="10">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)\b(Get-Domain(User|Group|Computer|Controller|Trust|GroupMember|Policy)?|Get-Net(User|Group|Computer|Session|LocalGroup|Share|Domain)|Invoke-(UserHunter|ShareFinder|Kerberoast|ACLScanner)|Find-(LocalAdminAccess|InterestingDomainAcl|DomainShare)|Get-ObjectAcl|Get-DomainObjectAcl)\b</field>
+    <!-- ROUTING 2026-07-08: PROMOTED to Tier-1 email (alert_by_email) despite L10.
+         PowerView-class offensive toolkit cmdlets belong with the credential-theft
+         family (100340/100474); no legitimate admin generator. -->
+    <options>no_full_log</options>
+    <options>alert_by_email</options>
+    <description>PS Module Recon: offensive AD toolkit (PowerView-class) by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1087.002</id>
+      <id>T1069.002</id>
+    </mitre>
+    <group>recon,discovery,ad_enumeration,offensive_tooling,</group>
+  </rule>
+
+  <!-- SPN / Kerberoast enumeration -->
+  <rule id="100473" level="12">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)(Invoke-Kerberoast|Request-SPNTicket|Get-DomainSPNTicket|GetUserSPNs|KerberosRequestorSecurityToken|-SPN\b|ServicePrincipalName)</field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Module CredAccess: SPN/Kerberoast enumeration by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+    <group>attack,credential_theft,kerberoasting,kerberos,</group>
+  </rule>
+
+  <!-- ===================== credential access ===================== -->
+  <rule id="100474" level="14">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)(Invoke-Mimikatz|Invoke-DCSync|Get-DCSync|DCSync|Out-Minidump|Get-GPPPassword|Get-VaultCredential|Get-Keystrokes|Get-LSASecret|Get-PassHashes|Invoke-NinjaCopy|Invoke-CredentialInjection|LsaEnumerateLogonSessions)</field>
+    <options>no_full_log</options>
+    <description>PS Module Attack: credential dumping/theft cmdlet by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1003</id>
+    </mitre>
+    <group>attack,credential_theft,</group>
+  </rule>
+
+  <!-- ===================== execution / download cradle ===================== -->
+  <rule id="100475" level="10">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)(Net\.WebClient|DownloadString|DownloadFile|DownloadData|Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer|\biwr\b|\bwget\b|\bcurl\b).{0,120}(https?://|ftp://)</field>
+    <options>no_full_log</options>
+    <description>PS Module Exec: remote download/exec cradle by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1059.001</id>
+      <id>T1105</id>
+    </mitre>
+    <group>attack,execution,download_cradle,</group>
+  </rule>
+
+  <!-- ===================== defense evasion ===================== -->
+
+  <!-- Encoded / obfuscated execution -->
+  <rule id="100476" level="10">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)(FromBase64String|-Enc(odedCommand)?\b|\[Convert\]::FromBase64|-bxor\b|\[char\]\s*(\d|0x)|-join\s*\(|\bIEX\b|Invoke-Expression)</field>
+    <options>no_full_log</options>
+    <description>PS Module Evasion: encoded/obfuscated execution by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1027</id>
+      <id>T1059.001</id>
+    </mitre>
+    <group>attack,defense_evasion,obfuscation,</group>
+  </rule>
+
+  <!-- Defender / AMSI tampering -->
+  <rule id="100477" level="13">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)(Set-MpPreference\s+.*-Disable|Add-MpPreference\s+.*-ExclusionPath|Set-MpPreference\s+.*-ExclusionProcess|amsiInitFailed|AmsiUtils|System\.Management\.Automation\.AmsiUtils|Disable-WindowsOptionalFeature.*Defender)</field>
+    <!-- ROUTING 2026-07-08: demoted to digest; exclusion/preference management is
+         routine endpoint admin. Hard-kill patterns are split into Tier-1 child
+         100606 in 107-alert_tuning_windows.xml. -->
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Module Evasion: Defender/AMSI tampering by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+    <group>attack,defense_evasion,</group>
+  </rule>
+
+  <!-- ===================== persistence / account manipulation ===================== -->
+  <rule id="100478" level="10">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)\b(New-ADUser|Set-ADAccountPassword|Add-ADGroupMember|Enable-ADAccount|Set-ADAccountControl|New-ADGroup|Set-ADUser)\b</field>
+    <options>no_full_log</options>
+    <description>PS Module Persistence: AD account/group modification cmdlet by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1136.002</id>
+    </mitre>
+    <group>attack,persistence,account_changed,</group>
+  </rule>
+
+  <!-- Privileged (Tier-0) group modification — high severity -->
+  <rule id="100479" level="13">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)Add-ADGroupMember.{0,200}(Domain\s*Admins|Enterprise\s*Admins|Schema\s*Admins|Administrators|Account\s*Operators|Backup\s*Operators|Domain\s*Controllers|Group\s*Policy\s*Creator)</field>
+    <!-- ROUTING 2026-07-08: demoted; the underlying 4728/4732 group change fires
+         the crown-jewel Tier-1 (60159/60154/...) — this cmdlet view is corroboration,
+         avoid double-interrupt. -->
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Module Tier-0: privileged group membership modification by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>attack,privilege_escalation,group_changed,tier0,</group>
+  </rule>
+
+  <!-- ===================== lateral movement ===================== -->
+  <rule id="100480" level="10">
+    <if_sid>100470</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)\b(Invoke-Command|Enter-PSSession|New-PSSession|New-CimSession)\b.{0,120}-ComputerName</field>
+    <options>no_full_log</options>
+    <description>PS Module Lateral: remote PowerShell execution (WinRM) by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1021.006</id>
+    </mitre>
+    <group>attack,lateral_movement,</group>
+  </rule>
+
+  <!-- ===================== correlation ===================== -->
+  <!-- Rapid AD enumeration by the same principal: 5+ AD-enum cmdlets in 5 min.
+       Correlates on the SID (always present) so it works even if the friendly
+       username decoder is not deployed. -->
+  <rule id="100485" level="12" frequency="5" timeframe="300">
+    <if_matched_sid>100471</if_matched_sid>
+    <same_field>win.system.securityUserID</same_field>
+    <options>no_full_log</options>
+    <options>no_email_alert</options>
+    <description>PS Module Recon burst: sustained AD enumeration by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1087.002</id>
+    </mitre>
+    <group>recon,discovery,reconnaissance_burst,correlation,</group>
+  </rule>
+
+</group>

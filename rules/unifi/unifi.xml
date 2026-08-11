@@ -1,0 +1,326 @@
+<!--
+  Environment: UniFi (UniFi Express 7 + UNAS 2, UniFi OS)
+  Log path: rsyslog LXC aggregator -> Wazuh agent (CEF over syslog)
+  Agent name: [FILL IN rsyslog LXC hostname]
+  Rule range: 100700-100799
+  Last updated: 2026-06-04
+  Default rule dependencies: 5700-series (sshd) ONLY — note these are NOT UniFi-scoped
+  Decoder dependencies: unifi, unifi-lan2lan, unifi-lan2wan, unifi-hostapd
+                        (custom decoders in unifi_decoders.xml). All other UniFi
+                        detections in the original reference (netfilter WAN_LOCAL/
+                        WAN_IN drops, Suricata priority tiers, dnsmasq DHCP) are
+                        UNSUPPORTED by any decoder and have been DROPPED.
+  REALIGNMENT NOTE: UniFi emits CEF, not netfilter "[WAN_LOCAL-3000-D]" kernel logs.
+    Fields used here are the verbatim decoder order names: type, srcprt, dstprt,
+    proto, srcip, dstip, uni_sigid, uni_risk, uni_signature, uni_changeagent,
+    uni_changedsection, uni_radius_result, srcmac, uni_action, uni_cat, uni_subcat.
+    NO data. prefix and NO .keyword suffix.
+-->
+<group name="unifi_custom,">
+
+  <!-- ============================================================ -->
+  <!-- FIREWALL — LAN-to-WAN (OUTBOUND) TRAFFIC (100700–100709)     -->
+  <!-- decoder: unifi-lan2wan | field "type": D=drop, A=accept       -->
+  <!-- ============================================================ -->
+
+  <!-- Rule ID: 100700 | Env: UniFi | Status: REWRITTEN -->
+  <!-- Single outbound firewall DROP (parent for exfil/beacon correlation) -->
+  <rule id="100700" level="5">
+    <decoded_as>unifi-lan2wan</decoded_as>
+    <field name="type">^D$</field>
+    <description>UniFi Firewall – Outbound (LAN_WAN) traffic dropped – blocked egress, possible compromised-host beaconing</description>
+    <group>unifi,firewall,network,</group>
+    <mitre><id>T1048</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100701 | Env: UniFi | Status: REWRITTEN -->
+  <!-- Outbound drop correlation: 10+ blocked egress attempts from same internal host in 60s -->
+  <rule id="100701" level="8" frequency="10" timeframe="60">
+    <if_matched_sid>100700</if_matched_sid>
+    <same_source_ip />
+    <description>UniFi Firewall – Repeated outbound drops: 10+ blocked egress in 60s from the same internal host – sustained beaconing / exfiltration attempt</description>
+    <group>unifi,firewall,network,</group>
+    <mitre><id>T1048</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100705 | Env: UniFi | Status: REWRITTEN -->
+  <!-- Outbound ACCEPT to uncommon high port (audit baseline of non-standard egress) -->
+  <rule id="100705" level="5">
+    <decoded_as>unifi-lan2wan</decoded_as>
+    <field name="type">^A$</field>
+    <field name="dstprt" negate="yes">^53$|^80$|^123$|^443$|^8080$</field>
+    <description>UniFi Firewall – Outbound (LAN_WAN) connection allowed to an uncommon high port – non-standard egress channel</description>
+    <group>unifi,firewall,network,</group>
+    <mitre><id>T1048</id></mitre>
+  </rule>
+
+  <!-- ============================================================ -->
+  <!-- FIREWALL — LAN-to-LAN (INTER-VLAN) TRAFFIC (100710–100719)   -->
+  <!-- decoder: unifi-lan2lan | field "type": D=drop, A=accept       -->
+  <!-- ============================================================ -->
+
+  <!-- Rule ID: 100710 | Env: UniFi | Status: REWRITTEN -->
+  <!-- Inter-VLAN blocked traffic (LAN_LAN drop) — lateral movement attempt -->
+  <rule id="100710" level="6">
+    <decoded_as>unifi-lan2lan</decoded_as>
+    <field name="type">^D$</field>
+    <description>UniFi Firewall – Inter-VLAN traffic BLOCKED (LAN_LAN) – lateral movement attempt across VLANs</description>
+    <group>unifi,firewall,network,</group>
+    <mitre><id>T1021</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100711 | Env: UniFi | Status: REWRITTEN -->
+  <!-- Inter-VLAN scan correlation: 10+ blocked LAN_LAN attempts from same host in 60s -->
+  <rule id="100711" level="8" frequency="10" timeframe="60">
+    <if_matched_sid>100710</if_matched_sid>
+    <same_source_ip />
+    <description>UniFi Firewall – Inter-VLAN scan: 10+ blocked LAN_LAN attempts in 60s from the same host – internal reconnaissance / lateral movement</description>
+    <group>unifi,firewall,network,</group>
+    <mitre><id>T1595.001</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100715 | Env: UniFi | Status: REWRITTEN -->
+  <!-- Inter-VLAN drop targeting common management/remote-access ports -->
+  <rule id="100715" level="7">
+    <decoded_as>unifi-lan2lan</decoded_as>
+    <field name="type">^D$</field>
+    <field name="dstprt">^22$|^23$|^445$|^3389$|^5900$|^8443$</field>
+    <description>UniFi Firewall – Inter-VLAN drop to a sensitive admin/remote-access port – targeted lateral movement attempt</description>
+    <group>unifi,firewall,network,</group>
+    <mitre><id>T1021</id></mitre>
+  </rule>
+
+  <!-- ============================================================ -->
+  <!-- IDS / IPS — UniFi Threat Management (100730–100739)          -->
+  <!-- decoder: unifi | fields: uni_sigid, uni_signature, uni_risk   -->
+  <!-- NOTE: UniFi IPS is NOT Suricata-as-decoded. Priority tiers do  -->
+  <!--       not exist; tiering is by uni_risk (ASSUMED VALUES).      -->
+  <!-- ============================================================ -->
+
+  <!-- Rule ID: 100730 | Env: UniFi | Status: REWRITTEN -->
+  <!-- Parent: any UniFi IPS/IDS signature alert (uni_sigid populated) -->
+  <rule id="100730" level="6">
+    <decoded_as>unifi</decoded_as>
+    <field name="uni_sigid">\d+</field>
+    <description>UniFi IDS/IPS – Signature alert – threat-management detection</description>
+    <group>unifi,ids,network,</group>
+    <mitre><id>T1595</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100731 | Env: UniFi | Status: REWRITTEN -->
+  <!-- High/critical risk IPS alert — tiered by uni_risk (ASSUMED values, case-insensitive) -->
+  <rule id="100731" level="13">
+    <if_sid>100730</if_sid>
+    <field name="uni_risk" type="pcre2">(?i)^(high|critical|severe)$</field>
+    <description>UniFi IDS/IPS – HIGH/CRITICAL risk signature – serious threat detected</description>
+    <group>unifi,ids,network,</group>
+    <mitre><id>T1190</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100732 | Env: UniFi | Status: REWRITTEN -->
+  <!-- Medium risk IPS alert — tiered by uni_risk (ASSUMED value, case-insensitive) -->
+  <rule id="100732" level="10">
+    <if_sid>100730</if_sid>
+    <field name="uni_risk" type="pcre2">(?i)^(medium|moderate)$</field>
+    <description>UniFi IDS/IPS – MEDIUM risk signature detected</description>
+    <group>unifi,ids,network,</group>
+    <mitre><id>T1595</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100735 | Env: UniFi | Status: NEW -->
+  <!-- C2 / malware-category IPS signature (matched on signature text) -->
+  <rule id="100735" level="13">
+    <if_sid>100730</if_sid>
+    <field name="uni_signature" type="pcre2">(?i)(command and control|\bC2\b|\bCNC\b|trojan|malware|botnet|beacon)</field>
+    <description>UniFi IDS/IPS – C2 / malware signature – command-and-control activity</description>
+    <group>unifi,ids,network,</group>
+    <mitre><id>T1071</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100736 | Env: UniFi | Status: NEW -->
+  <!-- Exploit-attempt IPS signature (matched on signature text) -->
+  <rule id="100736" level="13">
+    <if_sid>100730</if_sid>
+    <field name="uni_signature" type="pcre2">(?i)(exploit|privilege gain|web application attack|sql injection|remote code|RCE|shellcode|buffer overflow)</field>
+    <description>UniFi IDS/IPS – Exploit-attempt signature – exploitation attempt</description>
+    <group>unifi,ids,network,</group>
+    <mitre><id>T1203</id></mitre>
+  </rule>
+
+  <!-- ============================================================ -->
+  <!-- ADMIN CONFIG CHANGES (100740–100749)                         -->
+  <!-- decoder: unifi | fields: uni_changeagent, uni_changedsection -->
+  <!-- ============================================================ -->
+
+  <!-- Rule ID: 100740 | Env: UniFi | Status: NEW -->
+  <!-- Parent: any UniFi admin config change. Gate on the CEF event NAME (decoded into 'type'),
+       which is present on BOTH UniFi Network and UniFi OS/UNAS schemas. UNIFIadmin=/uni_changeagent
+       is NOT present on UniFi OS, so gating on it missed all UNAS events. -->
+  <rule id="100740" level="5">
+    <decoded_as>unifi</decoded_as>
+    <field name="type">^Admin Made Config Changes$</field>
+    <description>UniFi Admin – Configuration change – administrative change audit</description>
+    <group>unifi,authentication,</group>
+    <mitre><id>T1565</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100741 | Env: UniFi | Status: NEW -->
+  <!-- Elevated: config change to security / system / firewall settings -->
+  <rule id="100741" level="9">
+    <if_sid>100740</if_sid>
+    <field name="uni_changedsection" type="pcre2">(?i)(SYSTEM|SECURITY|FIREWALL|VPN|ADMIN|RADIUS|AUTH|RULE)</field>
+    <description>UniFi Admin – SECURITY/SYSTEM configuration change – possible defense tampering or persistence</description>
+    <group>unifi,authentication,</group>
+    <mitre><id>T1562.001</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100742 | Env: UniFi | Status: NEW -->
+  <!-- Admin config change made from an external (non-RFC1918) source IP -->
+  <rule id="100742" level="10">
+    <if_sid>100740</if_sid>
+    <srcip negate="yes">10.0.0.0/8</srcip>
+    <srcip negate="yes">172.16.0.0/12</srcip>
+    <srcip negate="yes">192.168.0.0/16</srcip>
+    <srcip negate="yes">127.0.0.0/8</srcip>
+    <srcip negate="yes">169.254.0.0/16</srcip>
+    <description>UniFi Admin – Configuration change from an EXTERNAL (non-RFC1918) IP – unexpected remote administration</description>
+    <group>unifi,authentication,</group>
+    <mitre><id>T1078.004</id></mitre>
+  </rule>
+
+  <!-- ============================================================ -->
+  <!-- WiFi RADIUS / hostapd AUTH (100750–100764)                   -->
+  <!-- decoder: unifi-hostapd | fields: srcmac, uni_action,          -->
+  <!--          uni_radius_result, uni_iface                         -->
+  <!-- ============================================================ -->
+
+  <!-- Rule ID: 100750 | Env: UniFi | Status: NEW -->
+  <!-- WiFi RADIUS authentication FAILED (parent for brute-force correlation) -->
+  <rule id="100750" level="5">
+    <decoded_as>unifi-hostapd</decoded_as>
+    <field name="uni_radius_result">^failed$</field>
+    <description>UniFi WiFi – RADIUS authentication FAILED – wireless credential probing</description>
+    <group>unifi,authentication,</group>
+    <mitre><id>T1110.001</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100751 | Env: UniFi | Status: NEW -->
+  <!-- WiFi RADIUS brute force: 5+ failures from same client MAC in 120s -->
+  <rule id="100751" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>100750</if_matched_sid>
+    <same_field>srcmac</same_field>
+    <description>UniFi WiFi – RADIUS brute force: 5+ auth failures in 120s from the same client MAC – sustained wireless credential attack</description>
+    <group>unifi,authentication,</group>
+    <mitre><id>T1110.001</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100755 | Env: UniFi | Status: NEW -->
+  <!-- WiFi RADIUS auth succeeded (parent for success-after-failure) -->
+  <rule id="100755" level="3">
+    <decoded_as>unifi-hostapd</decoded_as>
+    <field name="uni_radius_result">^succeeded$</field>
+    <description>UniFi WiFi – RADIUS authentication succeeded</description>
+    <group>unifi,authentication,</group>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- Rule ID: 100756 | Env: UniFi | Status: NEW -->
+  <!-- WiFi RADIUS success after prior brute force from same MAC -->
+  <rule id="100756" level="11">
+    <if_sid>100755</if_sid>
+    <if_matched_sid>100751</if_matched_sid>
+    <same_field>srcmac</same_field>
+    <description>UniFi WiFi – RADIUS auth SUCCEEDED after prior brute force – likely compromised wireless credentials</description>
+    <group>unifi,authentication,</group>
+    <mitre><id>T1078</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100760 | Env: UniFi | Status: NEW -->
+  <!-- WiFi STA associate (client connect) — low-level audit -->
+  <rule id="100760" level="3">
+    <decoded_as>unifi-hostapd</decoded_as>
+    <field name="uni_action">^associated$</field>
+    <description>UniFi WiFi – Client associated (STA) – wireless connection audit</description>
+    <group>unifi,authentication,</group>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- Rule ID: 100761 | Env: UniFi | Status: NEW -->
+  <!-- WiFi STA disassociate — low-level audit -->
+  <rule id="100761" level="3">
+    <decoded_as>unifi-hostapd</decoded_as>
+    <field name="uni_action">^disassociated$</field>
+    <description>UniFi WiFi – Client disassociated (STA) – wireless disconnection audit</description>
+    <group>unifi,authentication,</group>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- ============================================================ -->
+  <!-- WiFi CLIENT CONNECT (CEF Monitoring/WiFi) (100765–100769)    -->
+  <!-- decoder: unifi | fields: uni_clientmac, uni_clientip,         -->
+  <!--          uni_ssid, uni_subcat                                 -->
+  <!-- ============================================================ -->
+
+  <!-- Rule ID: 100765 | Env: UniFi | Status: NEW -->
+  <!-- WiFi client connected event (CEF) — low-level audit -->
+  <rule id="100765" level="3">
+    <decoded_as>unifi</decoded_as>
+    <field name="uni_subcat" type="pcre2">(?i)WiFi</field>
+    <field name="uni_clientmac">[0-9a-fA-F:]{17}</field>
+    <description>UniFi WiFi – Client connected to SSID (CEF Monitoring event) – client connection audit</description>
+    <group>unifi,authentication,</group>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- ============================================================ -->
+  <!-- SSH TO UniFi DEVICE (100720–100729)                          -->
+  <!-- NOTE: Only the DEFAULT sshd decoder applies. NO UniFi-specific -->
+  <!--       field distinguishes these from any other host's sshd.   -->
+  <!--       These chain from default 5700-series and are therefore  -->
+  <!--       NOT UniFi-scoped. Kept minimal per realignment guidance. -->
+  <!-- ============================================================ -->
+
+  <!-- Rule ID: 100720 | Env: UniFi | Status: REWRITTEN -->
+  <!-- SSH failed login (chains default sshd failure rules) — NOT UniFi-scoped -->
+  <rule id="100720" level="5">
+    <if_sid>5710,5716,5760</if_sid>
+    <description>SSH (host running sshd) – Failed login – credential probing (NOT UniFi-device-specific; default sshd decoder)</description>
+    <group>unifi,authentication,</group>
+    <mitre><id>T1110.001</id></mitre>
+  </rule>
+
+  <!-- Rule ID: 100725 | Env: UniFi | Status: REWRITTEN -->
+  <!-- SSH success from external (non-RFC1918) IP — chains default sshd success rule -->
+  <rule id="100725" level="8">
+    <if_sid>5715</if_sid>
+    <srcip negate="yes">10.0.0.0/8</srcip>
+    <srcip negate="yes">172.16.0.0/12</srcip>
+    <srcip negate="yes">192.168.0.0/16</srcip>
+    <srcip negate="yes">127.0.0.0/8</srcip>
+    <srcip negate="yes">169.254.0.0/16</srcip>
+    <description>SSH (host running sshd) – Login from an external (non-RFC1918) IP – unexpected remote admin access (default sshd decoder, not UniFi-specific)</description>
+    <group>unifi,authentication,</group>
+    <mitre><id>T1078.004</id></mitre>
+  </rule>
+
+</group>
+<!--
+  COVERAGE SUMMARY (REALIGNED TO ACTUAL DECODERS):
+  IMPLEMENTED:
+  - Outbound (LAN_WAN) firewall drop single + 10/60s correlation (exfil/beacon, T1048)
+  - Outbound allowed to uncommon high port (non-standard egress audit, T1048)
+  - Inter-VLAN (LAN_LAN) drop single + 10/60s scan correlation + admin-port targeting (T1021/T1595.001)
+  - UniFi IPS/IDS signature alert parent (uni_sigid) + uni_risk-tiered high/critical & medium
+    + C2/malware signature-text + exploit signature-text (T1190/T1071/T1203)
+  - Admin config change audit + security/system-section elevation + external-IP change (T1565/T1562.001/T1078.004)
+  - WiFi RADIUS auth failure single + 5/120s brute force (same srcmac) + success-after-brute (T1110.001/T1078)
+  - WiFi STA associate/disassociate audit + CEF WiFi-client-connect audit
+  - SSH failed-login + external-IP login (DEFAULT sshd decoder only; explicitly NOT UniFi-scoped)
+
+  DROPPED (no decoder supports them — see final report):
+  - WAN_LOCAL / WAN_IN netfilter "[WAN_LOCAL-3000-D]" drops (UniFi emits CEF, not netfilter)
+  - Firewall drop on management ports 22/8443/443 at WAN_LOCAL (no WAN chain decoded)
+  - WAN port-scan / SSH-port-brute / ICMP-flood correlations (no WAN drop events decoded)
+  - Suricata Priority 1/2/3 tiers (no suricata decoder; UniFi IPS is not Suricata-decoded)
+  - dnsmasq DHCPNAK and DHCP-starvation (no dnsmasq/DHCP decoder in this deployment)
+-->

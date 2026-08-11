@@ -1,0 +1,166 @@
+<!-- ============================================================
+     Cross-Device Correlation Rules
+     Rule IDs: 129000–129999
+     Docs: https://documentation.wazuh.com/current/user-manual/ruleset/ruleset-xml-syntax/rules.html
+
+     SCOPE / DESIGN
+     This file is the CROSS-DEVICE layer. It correlates auth + attack activity
+     that spans the appliances (ESXi 120xxx, vCenter 121xxx, McAfee NSP IPS
+     133xxx) together with the Linux defaults.
+     FIELD NOTE (corrected 2026-07-03): srcip is shared and reliable. The
+     USERNAME is NOT uniformly srcuser — the ssh/pam default decoders emit the
+     account as `user` (→ data.dstuser) for valid-user auth, and only use
+     srcuser for the invalid/illegal-user case. So the srcuser rules below
+     (129010/129011) catch appliance + invalid-user-SSH events; the dstuser
+     twins (129012/129013) catch the common valid-user Linux case. Confirm the
+     exact Linux field with `wazuh-logtest` on a real 5503/5716 line and prune
+     whichever twin does not populate.
+
+     It deliberately does NOT duplicate the existing per-platform correlation:
+       - Linux-internal  : Linux/0110-rocky_auth_correlation.xml (111xxx),
+                           Linux/0111-rocky_privesc_correlation.xml
+       - Windows-internal: 104-ad_correlation_rules.xml (100xxx)
+
+     WINDOWS BARRIER (important): Windows AD failed/again-success logons DO carry
+     the authentication_failed / authentication_success groups, but natively they
+     expose the actor as win.eventdata.ipAddress / win.eventdata.targetUserName —
+     NOT data.srcip / data.srcuser, and Wazuh <same_field> requires identical
+     field names on both events. The companion decoder windows_normalize_decoders.xml
+     BRIDGES this: it adds srcip/srcuser to failed logons (eventID 4625) so the
+     srcip/srcuser rules below DO include Windows once it is active. Windows actor
+     correlation also lives in 104-ad_correlation_rules.xml.
+     ⚠ windows_normalize is a child of the built-in windows_eventchannel decoder
+     and MUST be validated on the manager (wazuh-logtest with a real 4625 line —
+     confirm a populated srcip/srcuser AND that win.* fields are still present). If
+     it does not populate srcip on your build, these rules silently fall back to
+     Linux + appliances only (no false joins) until it is fixed or removed.
+
+     Validated default rule IDs (read from the root rule folders):
+       SSH 5710/5716 (authentication_failed), 5712 (brute force), 5715 (success);
+       PAM 5503 (failed) / 5501 (success); sudo 5401/5402; su 5303/5305.
+     Composite pattern matches the in-env convention in 0110-rocky_auth_correlation
+     (<if_sid>/<if_group> = current event, <if_matched_*>+frequency = history).
+     ============================================================ -->
+<!-- FIX 2026-07-04 (found live on test manager v4.14.3): every composite in this
+     file used <same_field> on srcip/srcuser/dstuser. Those are STATIC fields -
+     same_field only correlates DYNAMIC fields, so none of the 129xxx composites
+     could ever accumulate (verified empirically with wazuh-logtest-legacy).
+     Replaced with the static-field operators:
+       same_field srcip   -> <same_srcip />
+       same_field srcuser -> <same_srcuser />
+       same_field dstuser -> <same_user />  (same_user compares dstuser)
+     ALSO validated live: windows_normalize_decoders.xml is REJECTED by 4.14.3
+     ("Parent decoder name invalid: windows_eventchannel" - plugin decoders take
+     no XML children), so the Windows leg of these rules does NOT exist; they
+     correlate Linux + appliances only. -->
+<group name="correlation,cross_device,">
+
+  <!-- ── SOURCE-IP CORRELATION (data.srcip) ─────────────────────── -->
+
+  <!-- Same source IP generating auth failures across systems/platforms.
+       Broader net than the per-platform brute-force rules: catches one IP
+       hammering ESXi + vCenter + SSH + PAM together. -->
+  <rule id="129000" level="13" frequency="6" timeframe="600">
+    <if_matched_group>authentication_failed</if_matched_group>
+    <same_srcip />
+    <!-- ROUTING 2026-07-08: demoted (failure-only = scanning/stuffing).
+         NB: the 129xxx layer uses if_matched_group. These DO fire in production -
+         if_matched_group only fails to accumulate inside wazuh-logtest, not on the
+         live manager. So the cross-device takeover Tier-1s (129001/129002/129011/
+         129013) remain Tier-1 and email; they just cannot be exercised in logtest,
+         so confirm them with a live-traffic soak rather than a logtest case. -->
+    <options>no_email_alert</options>
+    <description>Cross-device: source IP $(srcip) is failing authentication across multiple systems — coordinated brute force / scanning</description>
+    <group>correlation,authentication_failed,brute_force,multi_platform_attack,</group>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+  </rule>
+
+  <!-- Recon -> exploitation: an IPS attack and an auth failure from the same IP.
+       Current event = an auth failure; history = >=2 IPS 'ids' alerts, same IP. -->
+  <rule id="129001" level="14" frequency="2" timeframe="900">
+    <if_group>authentication_failed</if_group>
+    <if_matched_group>ids</if_matched_group>
+    <same_srcip />
+    <description>Cross-device: IP $(srcip) triggered IPS attack detections and is now failing authentication — active reconnaissance + exploitation attempt</description>
+    <group>correlation,recon_and_attack,multi_platform_attack,</group>
+    <mitre>
+      <id>T1190</id>
+      <id>T1110</id>
+    </mitre>
+  </rule>
+
+  <!-- Possible successful brute force: a SUCCESSFUL login from an IP that just
+       produced several auth failures. Current = success; history = failures. -->
+  <rule id="129002" level="13" frequency="5" timeframe="300">
+    <if_group>authentication_success</if_group>
+    <if_matched_group>authentication_failed</if_matched_group>
+    <same_srcip />
+    <description>Cross-device: successful login from $(srcip) after multiple recent auth failures — possible successful brute force / account takeover</description>
+    <group>correlation,authentication_success,brute_force,account_takeover,</group>
+    <mitre>
+      <id>T1110</id>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- ── USERNAME CORRELATION (data.srcuser) ────────────────────── -->
+
+  <!-- Same username failing auth across systems/platforms — one credential
+       tried on ESXi + vCenter + Linux = credential stuffing / compromised acct. -->
+  <rule id="129010" level="13" frequency="5" timeframe="600">
+    <if_matched_group>authentication_failed</if_matched_group>
+    <same_srcuser />
+    <options>no_email_alert</options>
+    <description>Cross-device: user $(srcuser) is failing authentication across multiple systems — credential stuffing or compromised account</description>
+    <group>correlation,authentication_failed,credential_stuffing,multi_platform_attack,</group>
+    <mitre>
+      <id>T1110</id>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- Possible account takeover by username: a successful login by a user who
+       just failed authentication several times. -->
+  <rule id="129011" level="13" frequency="5" timeframe="300">
+    <if_group>authentication_success</if_group>
+    <if_matched_group>authentication_failed</if_matched_group>
+    <same_srcuser />
+    <description>Cross-device: user $(srcuser) authenticated successfully after multiple recent failures — possible successful brute force / account takeover</description>
+    <group>correlation,authentication_success,brute_force,account_takeover,</group>
+    <mitre>
+      <id>T1110</id>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- dstuser twins of 129010/129011 (added 2026-07-03) — cover the common
+       Linux valid-user case where the account is decoded as `user`/dstuser
+       rather than srcuser. Additive and safe: if dstuser is not populated on
+       your build these simply never fire. See FIELD NOTE in the header. -->
+  <rule id="129012" level="13" frequency="5" timeframe="600">
+    <if_matched_group>authentication_failed</if_matched_group>
+    <same_user />
+    <options>no_email_alert</options>
+    <description>Cross-device: user $(dstuser) is failing authentication across multiple systems — credential stuffing or compromised account</description>
+    <group>correlation,authentication_failed,credential_stuffing,multi_platform_attack,</group>
+    <mitre>
+      <id>T1110</id>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <rule id="129013" level="13" frequency="5" timeframe="300">
+    <if_group>authentication_success</if_group>
+    <if_matched_group>authentication_failed</if_matched_group>
+    <same_user />
+    <description>Cross-device: user $(dstuser) authenticated successfully after multiple recent failures — possible successful brute force / account takeover</description>
+    <group>correlation,authentication_success,brute_force,account_takeover,</group>
+    <mitre>
+      <id>T1110</id>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+</group>

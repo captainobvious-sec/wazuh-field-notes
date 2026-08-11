@@ -1,0 +1,266 @@
+<!-- Network App samples
+Jul 30 05:18:58 gateway CEF:0|Ubiquiti|UniFi Network|9.3.45|546|Admin Made Config Changes|2|UNIFIcategory=System UNIFIsubCategory=Admin UNIFIhost=gateway UNIFIsettingsChanges=this_controller: false UNIFIaccessMethod=web UNIFIsettingsSection=SETTINGS_SYSTEM UNIFIsettingsEntry=rsyslogd UNIFIadmin=admin src=192.0.2.5 msg=admin made a change to  in System settings. Source IP: 192.0.2.5
+
+Jul 30 05:35:34 gateway CEF:0|Ubiquiti|UniFi Network|9.3.45|400|WiFi Client Connected|1|UNIFIcategory=Monitoring UNIFIsubCategory=WiFi UNIFIhost=gateway UNIFIconnectedToDeviceName=gateway UNIFIconnectedToDeviceIp=192.0.2.1 UNIFIconnectedToDeviceMac=aa:bb:cc:dd:ee:01 UNIFIconnectedToDeviceModel=GATEWAY UNIFIconnectedToDeviceVersion=4.2.15 UNIFIclientAlias=client-device:ff UNIFIclientIp=192.0.2.10 UNIFIclientMac=aa:bb:cc:dd:ee:02 UNIFIwifiChannel=60 UNIFIwifiChannelWidth=40 UNIFIwifiName=CorpWiFi UNIFIwifiBand=na UNIFIauthMethod=wpapsk UNIFIWiFiRssi=-68 UNIFInetworkName=Silo UNIFInetworkSubnet=192.0.2.0/24 UNIFInetworkVlan=3 msg=client-device:ff connected to CorpWiFi on gateway. Connection Info: Ch. 60 (5 GHz, 40 MHz), -68 dBm. IP: 192.0.2.5
+-->
+
+<decoder name="unifi">
+  <!-- Wazuh ONLY evaluates decoders that declare a <program_name> when the log HAS a
+       program_name (prematch-only decoders are skipped in that case). Clean UniFi CEF arrives
+       as program_name="CEF", but the real forwarded UNAS lines have a DOUBLE timestamp, so the
+       predecoder grabs the 2nd timestamp's date-hour (e.g. "2026-06-04T21") as program_name.
+       Match BOTH so the decoder is actually evaluated; <prematch>Ubiquiti</prematch> is the
+       content guard. The base child below re-anchors on "0|Ubiquiti|" with a real pcre2 regex. -->
+  <program_name type="pcre2">^CEF$|^\d{4}-\d{2}-\d{2}T\d{2}$</program_name>
+  <prematch>Ubiquiti</prematch>
+</decoder>
+
+<!-- traffic (syslog) -->
+<decoder name="unifi-lan2lan">
+  <prematch>LAN_LAN</prematch>
+  <regex type="pcre2" offset="after_prematch">^-(\w)-\d+\] DESCR=\"(.*)\" IN=(\w+) OUT=(\w+) MAC=(\w{2}:\w{2}:\w{2}:\w{2}:\w{2}:\w{2}):(\w{2}:\w{2}:\w{2}:\w{2}:\w{2}:\w{2}):\w{2}:\w{2} SRC=(\d+\.\d+\.\d+\.\d+) DST=(\d+\.\d+\.\d+\.\d+) LEN=\d+ TOS=\d+ PREC=\w+ TTL=\d+ ID=\d+ PROTO=(\w+) SPT=(\d+) DPT=(\d+)</regex>
+  <order>type, uni_rulename, inbound, outbound, intmac, devmac, srcip, dstip, proto, srcprt, dstprt</order>
+</decoder>
+
+<decoder name="unifi-lan2wan">
+  <prematch>LAN_WAN</prematch>
+  <regex type="pcre2" offset="after_prematch">^-(\w)-\d+\] DESCR=\"(.*)\" IN=(\w+) OUT=(\w+) MAC=(\w{2}:\w{2}:\w{2}:\w{2}:\w{2}:\w{2}):(\w{2}:\w{2}:\w{2}:\w{2}:\w{2}:\w{2}):\w{2}:\w{2} SRC=(\d+\.\d+\.\d+\.\d+) DST=(\d+\.\d+\.\d+\.\d+) LEN=\d+ TOS=\d+ PREC=\w+ TTL=\d+ ID=\d+.*?PROTO=(\w+) SPT=(\d+) DPT=(\d+)</regex>
+  <order>type, uni_rulename, inbound, outbound, intmac, devmac, srcip, dstip, proto, srcprt, dstprt</order>
+</decoder>
+
+<!-- base -->
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">0\|Ubiquiti\|(.+?)\|(\d*\.*\d*\.*\d*)\|(\d+)\|(.+?)\|(\d{1,2})\|</regex>
+  <order>uni_app, app_version, event_id, type, severity</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <!-- Aug 23 17:55:30 gateway CEF:0|Ubiquiti|UniFi OS|4.3.9|updates|1|msg=Network has been updated to 9.3.45. -->
+  <regex type="pcre2">UniFi OS\|(\d*\.*\d*\.*\d*)\|(\w+)\|(\d)\|msg=(.+)</regex>
+  <order>app_version, type, severity, message</order>
+</decoder>
+
+<!-- kv start -->
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIcategory=(\w+)</regex>
+  <order>uni_cat</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIsubCategory=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_subcat</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIhost=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_host</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIaccessMethod=(\w+)</regex>
+  <order>uni_accessway</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">src=((?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39}))</regex>
+  <order>srcip</order>
+</decoder>
+
+<!-- UniFi OS (e.g. UNAS 2) has NO src= field; the real client/admin IP is only inside
+     msg as "Source IP: X". This also overrides src= with the true client IP when both exist. -->
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">Source IP:\s*((?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39})</regex>
+  <order>srcip</order>
+</decoder>
+
+<!-- UniFi OS config-change msg "<admin> changed <setting> ..." has NO UNIFIadmin= field -->
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">msg=(.+?) changed </regex>
+  <order>uni_changeagent</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">msg=(.+)</regex>
+  <order>message</order>
+</decoder>
+
+<!-- config changes -->
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIsettingsSection=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_changedsection</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIsettingsEntry=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_changedentry</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIadmin=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_changeagent</order>
+</decoder>
+
+<!-- wifi -->
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIclientAlias=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_clientdev</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIclientIp=((?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39}))</regex>
+  <order>uni_clientip</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIwifiName=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_ssid</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIWiFiRssi=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_rssi</order>
+</decoder>
+
+<!-- threat -->
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">proto=(\w+)</regex>
+  <order>proto</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">spt=(\d+)</regex>
+  <order>srcprt</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">dst=((?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39}))</regex>
+  <order>dstip</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">dpt=(\d+)</regex>
+  <order>dstprt</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIrisk=(\w+)</regex>
+  <order>uni_risk</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIipsSignature=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_signature</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIipsSignatureId=(\d+)</regex>
+  <order>uni_sigid</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIutcTime=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_utctime</order>
+</decoder>
+
+<!-- client/device/network KV fields -->
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIclientMac=([0-9a-fA-F:]{17})</regex>
+  <order>uni_clientmac</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFInetworkName=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_netname</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFInetworkSubnet=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_netsubnet</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFInetworkVlan=(\d+)</regex>
+  <order>uni_netvlan</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIdeviceName=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_devname</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIdeviceModel=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_devmodel</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIdeviceIp=((?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39}))</regex>
+  <order>uni_devip</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIdeviceMac=([0-9a-fA-F:]{17})</regex>
+  <order>uni_devmac</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIduration=(\d+)</regex>
+  <order>uni_duration</order>
+</decoder>
+
+<decoder name="unifi">
+  <parent>unifi</parent>
+  <regex type="pcre2">UNIFIipsSessionId=(.+?)(?=\s(?:UNIFI\w+=|src=|dst=|spt=|dpt=|proto=|msg=))</regex>
+  <order>uni_ipssessionid</order>
+</decoder>
+
+<!-- hostapd device syslog -->
+<decoder name="unifi-hostapd">
+  <program_name>hostapd</program_name>
+</decoder>
+
+<decoder name="unifi-hostapd">
+  <parent>unifi-hostapd</parent>
+  <regex type="pcre2">(\S+): STA ([0-9a-fA-F:]{17}) [\w ]+ (associated|disassociated)</regex>
+  <order>uni_iface, srcmac, uni_action</order>
+</decoder>
+
+<decoder name="unifi-hostapd">
+  <parent>unifi-hostapd</parent>
+  <regex type="pcre2">(\S+): STA ([0-9a-fA-F:]{17}) [\w ]+ RADIUS (authentication|accounting) (succeeded|failed)</regex>
+  <order>uni_iface, srcmac, uni_action, uni_radius_result</order>
+</decoder>

@@ -1,0 +1,46 @@
+<!-- ============================================================
+     Windows -> cross-platform field normalization
+
+     PURPOSE
+     Windows logon failures expose the attacker as win.eventdata.ipAddress /
+     win.eventdata.targetUserName. Linux + the appliances use data.srcip /
+     data.srcuser. Wazuh <same_field> needs identical field NAMES on both
+     events, so cross-platform correlation (correlation_rules.xml 129xxx) can
+     not otherwise bridge Windows. This decoder copies the Windows values into
+     srcip / srcuser so the 129xxx srcip/srcuser rules also catch Windows.
+
+     SAFETY (why this does not break Windows AD detection)
+     - It is an ADDITIVE CHILD of the built-in windows_eventchannel decoder
+       (<parent>windows_eventchannel</parent>). The eventchannel decoder still
+       fully decodes the event; every win.* field your 60xxx / 100xxx rules use
+       is untouched. This decoder only ADDS srcip / srcuser.
+     - It does NOT shadow/replace windows_eventchannel (that would require a
+       parent-less decoder matching the JSON — deliberately NOT done here).
+     - Scoped to failed logons (eventID 4625) only -> minimal volume/overhead.
+     - Requires a real IPv4 ipAddress, so local/console failures (ipAddress "-")
+       are skipped (they are not cross-host attacks).
+
+     ⚠ MUST VALIDATE BEFORE TRUSTING: child decoders on JSON eventchannel events
+     can behave differently across Wazuh 4.x builds. Run wazuh-logtest with a
+     real 4625 line and confirm the output shows decoder "windows_eventchannel"
+     AND a populated srcip. If srcip does NOT appear, this technique is not
+     supported on your build — just delete this file (no other impact).
+     ============================================================ -->
+
+  <!-- Child A: failed logon WITH a remote IPv4 -> normalize both user + IP.
+       (targetUserName precedes ipAddress in the 4625 eventdata JSON.) -->
+  <decoder name="win-normalize-auth">
+    <parent>windows_eventchannel</parent>
+    <prematch type="pcre2">"eventID"\s*:\s*"?4625"?</prematch>
+    <regex type="pcre2">"targetUserName"\s*:\s*"([^"]+)".*?"ipAddress"\s*:\s*"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"</regex>
+    <order>srcuser, srcip</order>
+  </decoder>
+
+  <!-- Child B (fallback): same event, srcip only — fires if A's combined
+       match fails (e.g. field ordering differs) so srcip is still normalized. -->
+  <decoder name="win-normalize-srcip">
+    <parent>windows_eventchannel</parent>
+    <prematch type="pcre2">"eventID"\s*:\s*"?4625"?</prematch>
+    <regex type="pcre2">"ipAddress"\s*:\s*"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"</regex>
+    <order>srcip</order>
+  </decoder>

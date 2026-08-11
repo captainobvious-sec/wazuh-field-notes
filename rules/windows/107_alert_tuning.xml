@@ -1,0 +1,178 @@
+<!-- ============================================================
+     Alert-tiering composites & refinement splits — Windows
+     Created 2026-07-08 (alerting-discipline review).
+     ID block 100600-100699 (previously unused).
+
+     Loads after 100_/101/102/103/104/105/106 (filename 107- sorts last of the
+     custom Windows set), so every if_sid/if_matched_sid parent below already
+     exists at load time.
+
+     PURPOSE: these are the precise TIER-1 (real-time email) detections that
+     REPLACE the FP-prone rules demoted to no_email_alert elsewhere this session.
+     Levels are >=13 so they email by the default email_alert_level.
+     ============================================================ -->
+<group name="windows,alert_tuning,">
+
+  <!-- ===== C4 — RDP success after a remote-logon failure burst (TIER-1) =====
+       The Windows twin of Linux 40112/111000. 100211 = remote/RDP 4625 failures
+       (carries win.eventdata.ipAddress); 100201 = successful RDP logon (type 10).
+       same_field ipAddress is proven working on this build (rule 100215 uses it).
+       freq=3 accounts for the OSSEC N+4 quirk (effective ~7 failures). -->
+  <rule id="100604" level="13" frequency="3" timeframe="300">
+    <if_sid>100201</if_sid>
+    <if_matched_sid>100211</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <options>no_full_log</options>
+    <description>AD: RDP logon SUCCEEDED from $(win.eventdata.ipAddress) after a burst of RDP/remote logon failures — possible successful RDP brute force / account takeover</description>
+    <mitre>
+      <id>T1110.001</id>
+      <id>T1078</id>
+      <id>T1021.001</id>
+    </mitre>
+    <group>authentication_success,attack_success,brute_force,remote_logon,</group>
+  </rule>
+
+  <!-- ===== C7 — Windows Defender / AMSI HARD-KILL split (TIER-1) =====
+       Children of 100440 (4104) and 100477 (4103), which are now no_email_alert.
+       A child overrides its parent, so only the hard-kill subset emails; routine
+       exclusion/preference management stays parent-only (dashboard/digest). -->
+  <rule id="100605" level="14">
+    <if_sid>100440</if_sid>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)-DisableRealtimeMonitoring\s+\$?true|-DisableBehaviorMonitoring\s+\$?true|-DisableScriptScanning\s+\$?true|-DisableIOAVProtection\s+\$?true|Uninstall-WindowsFeature\s+.*Windows-Defender</field>
+    <options>no_full_log</options>
+    <description>PS Attack: Windows Defender HARD-KILL — real-time/behavior/script protection disabled on $(win.system.computer)</description>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+    <group>attack,defense_evasion,</group>
+  </rule>
+
+  <rule id="100606" level="14">
+    <if_sid>100477</if_sid>
+    <field name="win.eventdata.payload" type="pcre2">(?i)-Disable(RealtimeMonitoring|BehaviorMonitoring|ScriptScanning|IOAVProtection)\s+\$?true|amsiInitFailed|System\.Management\.Automation\.AmsiUtils|\[Ref\]\.Assembly\.GetType\(</field>
+    <options>no_full_log</options>
+    <description>PS Module Evasion: Defender/AMSI HARD-KILL — protection disabled or AMSI patched by SID $(win.system.securityUserID) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+    <group>attack,defense_evasion,amsi_bypass,</group>
+  </rule>
+
+  <!-- ===== C8 — Unambiguous SAM/NTDS dump split (TIER-1) =====
+       Child of 100432 (now no_email_alert because its `vssadmin` alternation FPs
+       on every backup job). This half — ntds.dit or `reg save` of the SAM/SYSTEM
+       hives — has no benign generator. -->
+  <rule id="100607" level="14">
+    <if_sid>100432</if_sid>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)ntds\.dit|reg\s+save\s+.*\b(sam|system|security)\b|ntdsutil.*ifm</field>
+    <options>no_full_log</options>
+    <description>PS Attack: UNAMBIGUOUS SAM/NTDS credential dump (ntds.dit / reg save SAM|SYSTEM / ntdsutil IFM) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1003.002</id>
+      <id>T1003.003</id>
+    </mitre>
+    <group>attack,credential_theft,</group>
+  </rule>
+
+  <!-- ===== C10 — SQL Server xp_cmdshell / MSSQL RCE (TIER-1) =====
+       4688 process creation where sqlservr.exe is the parent of a shell/script
+       interpreter. Requires 4688 with command-line auditing (same GPO dependency
+       as 100340/100343); dormant if 4688 is not collected. -->
+  <rule id="100609" level="13">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4688$</field>
+    <field name="win.eventdata.parentProcessName" type="pcre2">(?i)\\sqlservr\.exe$</field>
+    <field name="win.eventdata.newProcessName" type="pcre2">(?i)\\(cmd|powershell|powershell_ise|pwsh|wscript|cscript|bash)\.exe$</field>
+    <options>no_full_log</options>
+    <description>SQL: sqlservr.exe spawned $(win.eventdata.newProcessName) on $(win.system.computer) — xp_cmdshell / MSSQL command execution</description>
+    <mitre>
+      <id>T1190</id>
+      <id>T1059.003</id>
+      <id>T1505.001</id>
+    </mitre>
+    <group>attack,execution,mssql,process_creation,</group>
+  </rule>
+
+  <!-- ===== C11 — Exchange OWA/ECP webshell child-process (TIER-1) =====
+       Sysmon-free ProxyLogon-class detection: 4688 where an Exchange web/UM
+       worker spawns a shell/recon binary. Dormant if 4688 is not collected on the
+       Exchange host. Complements the (Sysmon-dependent) default 91000-91007. -->
+  <rule id="100610" level="14">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4688$</field>
+    <field name="win.eventdata.parentProcessName" type="pcre2">(?i)\\(w3wp|UMWorkerProcess|MSExchangeHMWorker|MSExchangeMailboxReplication)\.exe$</field>
+    <field name="win.eventdata.newProcessName" type="pcre2">(?i)\\(cmd|powershell|powershell_ise|pwsh|net|net1|whoami|nltest|cscript|wscript)\.exe$</field>
+    <options>no_full_log</options>
+    <description>Exchange: $(win.eventdata.parentProcessName) spawned $(win.eventdata.newProcessName) on $(win.system.computer) — possible OWA/ECP webshell (ProxyLogon-class)</description>
+    <mitre>
+      <id>T1190</id>
+      <id>T1505.003</id>
+      <id>T1059.001</id>
+    </mitre>
+    <group>attack,execution,exchange,webshell,process_creation,</group>
+  </rule>
+
+</group>
+
+<!-- ============================================================
+     STAGED (NOT LOADED) — TIER-1 composites that need a one-line validation
+     before they can go live, kept here so they are ready to enable.
+
+     C1 / C2 / C3 need a "distinct value" correlation operator to express "many
+     DIFFERENT accounts/users" (the discriminator between a real spray and one
+     stale credential relocking). That operator is NOT used anywhere in this
+     ruleset, so its exact spelling is unconfirmed on your build. Enable by:
+       1) confirm the operator name with wazuh-logtest on a sample
+          (candidates: <different_field>FIELD</different_field> or
+           <not_same_field>FIELD</not_same_field>),
+       2) move the chosen rule(s) into the <group> above,
+       3) run wazuh-analysisd -t before deploying.
+     Until then the coarse rules (100301 / 100335 / 100364) remain no_email_alert
+     (digest), so spray still shows on the dashboard — just no real-time email.
+
+     C9 needs a CDB list of your tier-0 / privileged account names.
+
+     ==== C1  Lockout across MULTIPLE distinct accounts (real spray) ====
+     <rule id="100601" level="13" frequency="5" timeframe="180">
+       <if_matched_sid>100300</if_matched_sid>
+       <different_field>win.eventdata.targetUserName</different_field>
+       <options>no_full_log</options>
+       <description>AD: account lockouts across multiple DISTINCT accounts — real password spray on $(win.system.computer)</description>
+       <mitre><id>T1110.003</id></mitre>
+       <group>authentication_failed,brute_force,password_spray,attack,</group>
+     </rule>
+
+     ==== C2  Kerberos spray: one source IP, many distinct accounts ====
+     <rule id="100602" level="13" frequency="10" timeframe="120">
+       <if_matched_sid>100334</if_matched_sid>
+       <same_field>win.eventdata.ipAddress</same_field>
+       <different_field>win.eventdata.targetUserName</different_field>
+       <options>no_full_log</options>
+       <description>AD/Kerberos: bad-password pre-auth failures against many DISTINCT accounts from $(win.eventdata.ipAddress) — password spray</description>
+       <mitre><id>T1110.003</id></mitre>
+       <group>kerberos_failure,password_spray,brute_force,attack,</group>
+     </rule>
+
+     ==== C3  NTLM spray: one workstation, many distinct accounts ====
+     <rule id="100603" level="13" frequency="10" timeframe="120">
+       <if_matched_sid>100356</if_matched_sid>
+       <same_field>win.eventdata.workstation</same_field>
+       <different_field>win.eventdata.targetUserName</different_field>
+       <options>no_full_log</options>
+       <description>AD: FAILED NTLM validations against many DISTINCT accounts from $(win.eventdata.workstation) — NTLM password spray</description>
+       <mitre><id>T1110.003</id><id>T1550.002</id></mitre>
+       <group>attack,authentication,ntlm,brute_force,password_spray,</group>
+     </rule>
+
+     ==== C9  Password reset targeting a tier-0 / privileged account ====
+     (create CDB list etc/lists/tier0-accounts first: one "username:" per line,
+      then wazuh-analysisd will compile it.)
+     <rule id="100608" level="14">
+       <if_sid>100302</if_sid>
+       <list field="win.eventdata.targetUserName" lookup="match_key">etc/lists/tier0-accounts</list>
+       <options>no_full_log</options>
+       <description>AD: password of a TIER-0 account $(win.eventdata.targetUserName) was reset by $(win.eventdata.subjectUserName) — possible account takeover via forced reset</description>
+       <mitre><id>T1098</id><id>T1078.002</id></mitre>
+       <group>account_changed,password_reset,privilege_escalation,tier0,</group>
+     </rule>
+     ============================================================ -->

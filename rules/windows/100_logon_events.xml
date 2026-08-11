@@ -1,0 +1,224 @@
+<!-- ============================================================
+     Defines the per-logon-type detail rules and failed-logon rules,
+     plus brute-force correlations. Chains:
+       4624 success -> 60106   (silenced to L0 in 103-local_rules)
+       4625 failure -> 60122   (silenced to L0 in 103-local_rules)
+       4634/4647    -> 60137   (silenced to L0 in 103-local_rules)
+     Because the parents are level 0 they route but don't double-alert.
+     ============================================================ -->
+<group name="windows,authentication,ad_logon,">
+
+  <!-- ===================== 4624 success ===================== -->
+  <rule id="100200" level="2">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4624$</field>
+    <field name="win.eventdata.logonType">^2$</field>
+    <options>no_full_log</options>
+    <description>AD: Interactive logon - $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <group>authentication_success,interactive_logon,</group>
+  </rule>
+
+  <!-- Chains from default 92653 (plain RDP) so it is NOT shadowed by the 0840
+       chain (92651->92653) that also lives under 60106. Wazuh takes the first
+       matching child path under a parent (by load order, defaults first), so a
+       rule under 60106 alongside 92651 never gets evaluated for remote logons.
+       NTLM-RDP (92657) and loopback-RDP (92656, L15) are intentionally left to
+       those higher-value default rules. Re-parent under the winning default;
+       do NOT just suppress it to L0 (92651 would still consume the event). -->
+  <rule id="100201" level="5">
+    <if_sid>92653</if_sid>
+    <field name="win.eventdata.logonType">^10$</field>
+    <options>no_full_log</options>
+    <description>AD: RDP logon - $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress)</description>
+    <mitre>
+      <id>T1021.001</id>
+    </mitre>
+    <group>authentication_success,remote_logon,</group>
+  </rule>
+
+  <!-- Re-parented 60106 -> 92651: the default remote-logon gate 92651 matched first
+       and shadowed this rule for remote network logons, which also killed 110003
+       (Golden Ticket) that chains from here. As a child of 92651 it fires for remote
+       (non-loopback IPv4) type-3 logons — the case PtT/Golden Ticket actually use.
+       Local/no-IP network logons aren't covered here (L0 audit only). -->
+  <rule id="100202" level="0">
+    <if_sid>92651</if_sid>
+    <field name="win.eventdata.logonType">^3$</field>
+    <options>no_full_log</options>
+    <description>AD: Network logon - $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress)</description>
+    <group>authentication_success,network_logon,</group>
+  </rule>
+
+  <rule id="100203" level="0">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4624$</field>
+    <field name="win.eventdata.logonType">^5$</field>
+    <options>no_full_log</options>
+    <description>AD: Service logon - $(win.eventdata.targetUserName)</description>
+    <group>authentication_success,service_logon,</group>
+  </rule>
+
+  <rule id="100204" level="2">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4624$</field>
+    <field name="win.eventdata.logonType">^4$</field>
+    <options>no_full_log</options>
+    <description>AD: Batch logon - $(win.eventdata.targetUserName)</description>
+    <group>authentication_success,batch_logon,</group>
+  </rule>
+
+  <rule id="100205" level="0">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4624$</field>
+    <field name="win.eventdata.logonType">^7$</field>
+    <options>no_full_log</options>
+    <description>AD: Workstation unlocked - $(win.eventdata.targetUserName)</description>
+    <group>authentication_success,workstation_unlock,</group>
+  </rule>
+
+  <rule id="100206" level="6">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4624$</field>
+    <field name="win.eventdata.logonType">^9$</field>
+    <options>no_full_log</options>
+    <description>AD: NewCredentials logon (runas /netonly) - $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>authentication_success,suspicious_logon,</group>
+  </rule>
+
+  <rule id="100207" level="2">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4624$</field>
+    <field name="win.eventdata.logonType">^11$</field>
+    <options>no_full_log</options>
+    <description>AD: Cached interactive logon - $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <group>authentication_success,cached_logon,</group>
+  </rule>
+
+  <rule id="100208" level="8">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4624$</field>
+    <field name="win.eventdata.targetUserName" type="pcre2">^ANONYMOUS LOGON$</field><!-- Windows logs this in uppercase consistently; (?i) omitted intentionally -->
+    <options>no_full_log</options>
+    <description>AD: Anonymous logon detected on $(win.system.computer) from $(win.eventdata.ipAddress)</description>
+    <group>authentication_success,anonymous_logon,suspicious_logon,</group>
+  </rule>
+
+  <!-- ===================== 4625 failure ===================== -->
+  <!-- substatus rules first (higher signal), then logon-type rules -->
+  <rule id="100213" level="6">
+    <if_sid>60122</if_sid>
+    <field name="win.system.eventID">^4625$</field>
+    <field name="win.eventdata.subStatus" type="pcre2">(?i)^0xC0000064$</field>
+    <options>no_full_log</options>
+    <description>AD: Logon failed - unknown username $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <group>authentication_failed,account_enumeration,</group>
+  </rule>
+
+  <rule id="100214" level="7">
+    <if_sid>60122</if_sid>
+    <field name="win.system.eventID">^4625$</field>
+    <field name="win.eventdata.subStatus" type="pcre2">(?i)^0xC0000072$</field>
+    <options>no_full_log</options>
+    <description>AD: Logon failed - disabled account $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <group>authentication_failed,account_disabled,</group>
+  </rule>
+
+  <rule id="100210" level="5">
+    <if_sid>60122</if_sid>
+    <field name="win.system.eventID">^4625$</field>
+    <field name="win.eventdata.logonType">^2$</field>
+    <options>no_full_log</options>
+    <description>AD: Interactive logon failed - $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <group>authentication_failed,interactive_logon,</group>
+  </rule>
+
+  <!-- Widened from logonType ^10$ to ^(3|10)$ + a non-loopback ipAddress.
+       NLA/CredSSP validates RDP credentials as a NETWORK logon (type 3) before the
+       interactive (type 10) session is ever created, so wrong-password RDP attempts
+       surface as 4625 type 3 with the client IP populated - NOT type 10. Requiring a
+       real remote IP (a) keeps legacy/NLA-disabled type-10 RDP, (b) captures real NLA
+       RDP brute force, (c) excludes local/console type-3 failures (ipAddress "-"),
+       which fall through to 100212. MUST stay ordered BEFORE 100212 so remote type-3
+       matches here first (first matching child under 60122 wins).
+       Caveat: remote SMB/other type-3 credential failures also match here - accepted,
+       they are still remote credential brute force; add a logonProcessName ^NtLmSsp$
+       / ^Kerberos$ field if you ever need RDP-only. Feeds 100215/100222. -->
+  <rule id="100211" level="5">
+    <if_sid>60122</if_sid>
+    <field name="win.system.eventID">^4625$</field>
+    <field name="win.eventdata.logonType" type="pcre2">^(3|10)$</field>
+    <field name="win.eventdata.ipAddress" type="pcre2">^(?!-$)(?!127\.)(?!::1$)(?!0\.0\.0\.0$).+$</field>
+    <options>no_full_log</options>
+    <description>AD: RDP/remote logon failed - $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress)</description>
+    <group>authentication_failed,remote_logon,</group>
+  </rule>
+
+  <rule id="100212" level="3">
+    <if_sid>60122</if_sid>
+    <field name="win.system.eventID">^4625$</field>
+    <field name="win.eventdata.logonType">^3$</field>
+    <options>no_full_log</options>
+    <description>AD: Network logon failed - $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress)</description>
+    <group>authentication_failed,network_logon,</group>
+  </rule>
+
+  <!-- ===================== correlations ===================== -->
+  <!-- RDP brute force: 5 RDP failures from same IP in 120s -->
+  <rule id="100215" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>100211</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <options>no_full_log</options>
+    <description>AD: RDP/remote logon brute force detected from $(win.eventdata.ipAddress)</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>authentication_failed,brute_force,attack,</group>
+  </rule>
+
+  <!-- Interactive brute force: 5 failures same user in 60s -->
+  <rule id="100216" level="10" frequency="5" timeframe="60">
+    <if_matched_sid>100210</if_matched_sid>
+    <same_field>win.eventdata.targetUserName</same_field>
+    <options>no_full_log</options>
+    <description>AD: Interactive logon brute force against $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>authentication_failed,brute_force,attack,</group>
+  </rule>
+
+  <!-- Multiple RDP failures for the same user within 5 minutes = possible
+       brute-force in progress. Fires on the 2nd RDP failure (100211) for
+       the same targetUserName — NOT a success-after-failure rule. -->
+  <rule id="100222" level="7" frequency="3" timeframe="300">
+    <if_matched_sid>100211</if_matched_sid>
+    <same_field>win.eventdata.targetUserName</same_field>
+    <options>no_full_log</options>
+    <description>AD: Multiple RDP/remote logon failures for $(win.eventdata.targetUserName) — possible brute-force in progress</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>authentication_failed,brute_force,attack,</group>
+  </rule>
+
+  <!-- ===================== logoff ===================== -->
+  <rule id="100220" level="0">
+    <if_sid>60137</if_sid>
+    <field name="win.system.eventID">^4634$</field>
+    <options>no_full_log</options>
+    <description>AD: Account logoff - $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <group>logoff,</group>
+  </rule>
+
+  <rule id="100221" level="0">
+    <if_sid>60137</if_sid>
+    <field name="win.system.eventID">^4647$</field>
+    <options>no_full_log</options>
+    <description>AD: User-initiated logoff - $(win.eventdata.targetUserName) on $(win.system.computer)</description>
+    <group>logoff,</group>
+  </rule>
+
+</group>
