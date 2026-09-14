@@ -1,0 +1,110 @@
+<!--
+  Rocky Linux - Lateral movement / recon / credential access
+  Load order: 113_ (after 112_persistence.xml)
+  Custom ID range: 111300-111399
+
+  TELEMETRY PREREQUISITES (advanced tier):
+   * Command auditing. Two supported wirings:
+       (a) Standard Wazuh command auditing: audit-wazuh-c key feeds rule 80792.
+           The execve-content rules below chain off 80792.
+       (b) If you do NOT run 80792, deploy ingest/linux/wazuh-linux.rules and
+           change if_sid 80792 to if_sid 80700 plus a
+           field audit.key match.
+   * File-access detections use dedicated audit watch keys (off 80700).
+  audit.exe / audit.execve carry the binary path and full argv.
+  Validate with /var/ossec/bin/wazuh-logtest. Re-point if_sid if your
+  auditd command-key wiring differs.
+-->
+<group name="lateral_movement,rocky_linux,correlation,">
+
+  <!-- ===== Internal reconnaissance [AUDIT execve via 80792] ===== -->
+
+  <!-- 111300: network/host enumeration tool executed -->
+  <rule id="111300" level="9">
+    <if_sid>80792</if_sid>
+    <field name="audit.exe" type="pcre2">(?i)/(nmap|masscan|arp-scan|netdiscover|fping|hping3|zmap)$</field>
+    <description>Lateral: network scanning tool executed on $(agent.name) - $(audit.exe)</description>
+    <mitre><id>T1046</id><id>T1018</id></mitre>
+    <group>network_enumeration,reconnaissance,</group>
+  </rule>
+
+  <!-- ===== Reverse / bind shell patterns [AUDIT execve via 80792] ===== -->
+
+  <!-- 111310: classic reverse-shell argv patterns.
+       FIX 2026-07-03: (a) matched on the non-existent coalesced audit.execve
+       field -> rewritten to <match> on raw argv tokens (a0="..."), like the
+       default 0850 rules; (b) anchored the tool names to whole argv values so
+       `ssh -i key` no longer matches "sh -i" and `rsync -e ssh` no longer
+       matches "nc ... -e". LIMITATION: a one-liner like bash -c "... /dev/tcp/
+       ..." is a single argv token WITH SPACES, which auditd hex-encodes, so it
+       is invisible to any argv match — accept the gap or add a decoder for the
+       hex 'a1' form. Verify with wazuh-logtest. -->
+  <rule id="111310" level="13">
+    <if_sid>80792</if_sid>
+    <match type="pcre2">(?i)a\d+="[^"]*/dev/(tcp|udp)/|a\d+="nc(at)?"\s+.*a\d+="-e|a\d+="socat".*a\d+="[^"]*exec|a\d+="(bash|sh|dash|zsh|ksh)"\s+a\d+="-i"|a\d+="python[0-9]?".*a\d+="-c".*socket|a\d+="perl".*a\d+="-e".*socket</match>
+    <description>Lateral: reverse/bind shell command pattern on $(agent.name) - $(audit.command)</description>
+    <mitre><id>T1059.004</id><id>T1571</id></mitre>
+    <group>reverse_shell,c2_connection,</group>
+  </rule>
+
+  <!-- 111311: an interactive shell was spawned by a service/web account.
+       FIX 2026-07-03: matched on audit.acct, which the decoder only sets on
+       USER_ACCT/CRED_ACQ records — SYSCALL/EXECVE events (the ones reaching
+       80792) carry only NUMERIC uids, so this never fired. Now matches
+       audit.uid against the fixed RPM service UIDs: apache=48, postgres=26,
+       mysql=27. ENV-SPECIFIC: nginx / tomcat / app service accounts get
+       dynamic UIDs — add yours from /etc/passwd (e.g. ^(48|26|27|991|992)$).
+       Confirm the executing uid field with wazuh-logtest on a real EXECVE. -->
+  <rule id="111311" level="13">
+    <if_sid>80792</if_sid>
+    <field name="audit.uid" type="pcre2">^(48|26|27)$</field>
+    <field name="audit.exe" type="pcre2">(?i)/(bash|sh|dash|zsh|ksh)$</field>
+    <!-- ROUTING 2026-07-08: demoted to digest; postgres archive_command, cron and
+         maintenance jobs legitimately spawn shells under service UIDs - baseline
+         your app-service UIDs before treating this as an interrupt. -->
+    <options>no_email_alert</options>
+    <description>Lateral: interactive shell spawned by service account (uid=$(audit.uid)) on $(agent.name) - webshell / RCE suspected</description>
+    <mitre><id>T1190</id><id>T1059.004</id></mitre>
+    <group>webshell,rce,</group>
+  </rule>
+
+  <!-- ===== SSH pivoting [AUDIT execve via 80792] ===== -->
+
+  <!-- 111320: outbound ssh client launched (pivot attempt) -->
+  <rule id="111320" level="9">
+    <if_sid>80792</if_sid>
+    <field name="audit.exe" type="pcre2">(?i)/(ssh|sshpass)$</field>
+    <description>Lateral: outbound SSH client launched on $(agent.name) - possible pivot ($(audit.command))</description>
+    <mitre><id>T1021.004</id></mitre>
+    <group>ssh_pivoting,</group>
+  </rule>
+
+  <!-- (removed 111321 "outbound ssh after inbound login": if_matched_sid counts a
+       one-time login, which can't satisfy frequency>=2 without missing single-login
+       pivots. The standalone 111320 already flags the outbound ssh client.) -->
+
+  <!-- ===== Credential access [AUDIT watch keys off 80700] ===== -->
+
+  <!-- 111330: read of /etc/shadow or /etc/gshadow [key=rocky_cred_shadow] -->
+  <rule id="111330" level="12">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">rocky_cred_shadow</field>
+    <!-- ROUTING 2026-07-08: demoted to digest; the PAM stack reads shadow on every
+         local auth, so volume depends entirely on the audit watch's exclusions -
+         baseline before promoting. -->
+    <options>no_email_alert</options>
+    <description>CredAccess: shadow/gshadow read on $(agent.name) by uid $(audit.auid) - credential dumping</description>
+    <mitre><id>T1003.008</id></mitre>
+    <group>credential_access,</group>
+  </rule>
+
+  <!-- 111331: read/copy of an SSH private key [key=rocky_cred_sshkey] -->
+  <rule id="111331" level="11">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">rocky_cred_sshkey</field>
+    <description>CredAccess: SSH private key accessed on $(agent.name) - $(audit.file.name) - key theft for pivoting</description>
+    <mitre><id>T1552.004</id></mitre>
+    <group>credential_access,key_theft,</group>
+  </rule>
+
+</group>

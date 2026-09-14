@@ -1,0 +1,44 @@
+## ---------------------------------------------------------------------------
+## Rocky Linux auditd rules for the Wazuh "advanced tier" detections
+## Deploy to:  /etc/audit/rules.d/wazuh-rocky.rules   then:  augenrules --load
+## Confirm:    auditctl -l        (and reboot-safe via rules.d)
+## Field keys here MUST match the <field name="audit.key"> values in the
+## 111_/113_/114_ rule files. auid>=1000 limits to real users (skip auid=4294967295 unset).
+## ---------------------------------------------------------------------------
+
+## --- Generic command auditing (drives rule 80792 -> all execve-content rules) ---
+## Requires etc/lists/audit-keys to contain:  audit-wazuh-c:command
+## and ossec.conf to read /var/log/audit/audit.log (command monitoring).
+-a always,exit -F arch=b64 -F euid=0 -S execve -k audit-wazuh-c
+-a always,exit -F arch=b32 -F euid=0 -S execve -k audit-wazuh-c
+
+## --- Privilege escalation (111_privilege_escalation.xml) ---
+# SUID/SGID bit set on a file (rule 111110)
+-a always,exit -F arch=b64 -S chmod,fchmod -F a1&06000 -F auid>=1000 -F auid!=4294967295 -k rocky_priv_setuid_file
+-a always,exit -F arch=b64 -S fchmodat       -F a2&06000 -F auid>=1000 -F auid!=4294967295 -k rocky_priv_setuid_file
+# Kernel module load (rule 111120)
+-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k rocky_priv_kmod
+# ptrace / process injection (rule 111130)
+-a always,exit -F arch=b64 -S ptrace -F auid>=1000 -F auid!=4294967295 -k rocky_priv_ptrace
+# setcap - granting file capabilities (rule 111140)
+-a always,exit -F arch=b64 -S execve -F exe=/usr/sbin/setcap -k rocky_priv_setcap
+# pkexec - PwnKit watch (rule 111150/111151)
+-a always,exit -F arch=b64 -S execve -F exe=/usr/bin/pkexec -k rocky_priv_pkexec
+
+## --- Credential access (113_lateral_movement.xml) ---
+# /etc/shadow + /etc/gshadow read (rule 111330)
+-w /etc/shadow  -p r -k rocky_cred_shadow
+-w /etc/gshadow -p r -k rocky_cred_shadow
+# SSH private key access (rule 111331) - watches are per-path; add one line per
+# sensitive key location you care about (service accounts, root):
+-w /root/.ssh/id_rsa     -p r -k rocky_cred_sshkey
+-w /root/.ssh/id_ed25519 -p r -k rocky_cred_sshkey
+#  (repeat for /home/<svc>/.ssh/<key> as needed)
+
+## --- Defense evasion (114_defense_evasion.xml) ---
+# Deletion / rename of files under /var/log (rule 111440) - deletion only, no append noise
+-a always,exit -F arch=b64 -S unlink,unlinkat,rename,renameat,renameat2 -F dir=/var/log -F auid>=1000 -F auid!=4294967295 -k rocky_evasion_logdel
+
+## Note: setenforce, firewall-cmd, auditctl, touch, date, dnf remove, ssh, nmap,
+## reverse-shell argv etc. are caught by the generic execve auditing above
+## (rule 80792) and matched on audit.exe / audit.execve - no extra keys needed.

@@ -9,15 +9,17 @@ saved-search objects — **not** Lens, which does not exist in OpenSearch Dashbo
 | `windows/02-windows-security.ndjson` | Wazuh - Windows Security | `wazuh-alerts-*` (placeholder) | 24h |
 | `windows/03-mitre-attack.ndjson` | Wazuh - MITRE ATT&CK (all platforms) | `wazuh-alerts-*` (placeholder) | 7d |
 | `windows/04-operational-health.ndjson` | Wazuh - Operational Health | `wazuh-alerts-*` + `wazuh-monitoring-*` (placeholders) | 24h, 300s auto-refresh |
+| `linux/01-security.ndjson` | Rocky Linux Security | `wazuh-alerts-*` (placeholder) | — |
+| `linux/02-syslog.ndjson` | Rocky Linux Syslog Activity | `wazuh-alerts-*` (placeholder) | — |
 | `unifi/unifi.ndjson` | UniFi - Network Security | `wazuh-alerts-4.x-*` (**bundled**) | — |
 | `proxmox/proxmox.ndjson` | Proxmox VE + PBS - Infrastructure | `wazuh-alerts-4.x-*` (**bundled**) | — |
 
-## 1. Substitute the index-pattern IDs (Windows dashboards only)
+## 1. Substitute the index-pattern IDs (Windows and Linux dashboards)
 
 NDJSON links visualizations to index patterns by **saved-object id**, not by title, and
 that id is not the same on every installation — depending on how the Wazuh dashboard
 plugin created it, it may be `wazuh-alerts-*` or the legacy double-prefixed
-`index-pattern:wazuh-alerts-*`. The four Windows files therefore ship with placeholders:
+`index-pattern:wazuh-alerts-*`. The four Windows files and the two Linux files therefore ship with placeholders:
 
 - `WAZUH_ALERTS_IP_ID` → your `wazuh-alerts-*` index-pattern id
 - `WAZUH_MONITORING_IP_ID` → your `wazuh-monitoring-*` index-pattern id
@@ -29,10 +31,11 @@ copy the id out of the URL), or from Dev Tools:
 GET .kibana/_search?q=type:index-pattern&_source=index-pattern.title&size=50
 ```
 
-Then substitute, from the `dashboards/windows/` folder:
+Then substitute, from `dashboards/`:
 
 ```bash
-sed -i 's/WAZUH_ALERTS_IP_ID/<real-alerts-id>/g; s/WAZUH_MONITORING_IP_ID/<real-monitoring-id>/g' 0*.ndjson
+sed -i 's/WAZUH_ALERTS_IP_ID/<real-alerts-id>/g; s/WAZUH_MONITORING_IP_ID/<real-monitoring-id>/g' \
+    windows/*.ndjson linux/*.ndjson
 ```
 
 (on macOS use `sed -i ''`). TSVB panels reference the index by **title** internally, so

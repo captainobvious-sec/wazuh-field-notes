@@ -21,7 +21,7 @@
      It deliberately does NOT duplicate per-platform correlation, which lives
      in the platform rule files:
        - Windows : rules/windows/104_ad_correlation.xml (100xxx)
-       - Linux   : your own Linux correlation rules (111xxx) — not shipped here
+       - Linux   : rules/linux/110_auth_correlation.xml and siblings (111xxx)
 
      WINDOWS BARRIER (important): Windows AD failed/again-success logons DO carry
      the authentication_failed / authentication_success groups, but natively they

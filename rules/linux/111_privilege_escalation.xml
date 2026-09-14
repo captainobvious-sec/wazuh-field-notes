@@ -1,0 +1,124 @@
+<!--
+  Rocky Linux - Privilege escalation
+  Load order: 111_ (after 110_auth_correlation.xml)
+  Custom ID range: 111100-111199
+
+  TELEMETRY PREREQUISITES (advanced tier):
+   * auditd integration with the keys in ingest/linux/wazuh-linux.rules
+       - syscall detections chain off 80700 + field audit.key
+   * FIM (syscheck) on the paths in ingest/linux/syscheck-snippet.xml
+       - file detections chain off 550/553/554 + field syscheck.path
+  Each rule is tagged [AUDIT] or [FIM] with the key/path it needs.
+  Validate every rule with:  /var/ossec/bin/wazuh-logtest
+-->
+<group name="privilege_escalation,rocky_linux,correlation,">
+
+  <!-- ===== sudoers tampering [FIM: /etc/sudoers, /etc/sudoers.d] ===== -->
+
+  <!-- 111100: sudoers file added/modified/deleted -->
+  <rule id="111100" level="12">
+    <if_sid>550,553,554</if_sid>
+    <field name="syscheck.path" type="pcre2">(?i)/etc/sudoers</field>
+    <description>PrivEsc: sudoers policy changed ($(syscheck.path)) on $(agent.name)</description>
+    <mitre><id>T1548.003</id><id>T1222.002</id></mitre>
+    <group>sudoers_modification,</group>
+  </rule>
+
+  <!-- ===== SUID/SGID abuse ===== -->
+
+  <!-- 111110: SUID/SGID bit set via chmod [AUDIT key=rocky_priv_setuid_file] -->
+  <rule id="111110" level="11">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">rocky_priv_setuid_file</field>
+    <description>PrivEsc: setuid/setgid bit set on a file on $(agent.name) - $(audit.file.name)</description>
+    <mitre><id>T1548.001</id></mitre>
+    <group>suid_creation,</group>
+  </rule>
+
+  <!-- 111111: a new SUID/SGID-capable binary appeared in a system path [FIM].
+       FIX 2026-07-03: exclude the known-attack-tool basenames so that dropping
+       e.g. /usr/bin/ncat falls through to the more specific L11 rule 111250
+       (112_persistence.xml), which loads AFTER this file and was otherwise
+       shadowed by this generic L10 rule for exactly the system-bin-dir case. -->
+  <rule id="111111" level="10">
+    <if_sid>554</if_sid>
+    <field name="syscheck.path" type="pcre2">(?i)^/(usr/)?(s)?bin/</field>
+    <field name="syscheck.path" negate="yes" type="pcre2">(?i)/(ncat|netcat|socat|nmap|masscan|hydra|john|hashcat|chisel|mimipenguin|linpeas|pspy)(\.|$)</field>
+    <description>PrivEsc: new binary added to a system path on $(agent.name) - $(syscheck.path) - verify it is not an attacker SUID drop</description>
+    <mitre><id>T1548.001</id><id>T1036.005</id></mitre>
+    <group>suid_creation,binary_added,</group>
+  </rule>
+
+  <!-- ===== Kernel module abuse ===== -->
+
+  <!-- 111120: kernel module loaded [AUDIT key=rocky_priv_kmod: init_module/finit_module] -->
+  <rule id="111120" level="12">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">rocky_priv_kmod</field>
+    <!-- ROUTING 2026-07-08: demoted to digest; boot / DKMS / driver updates load
+         modules legitimately. -->
+    <options>no_email_alert</options>
+    <description>PrivEsc: kernel module load syscall on $(agent.name) - possible rootkit/LKM</description>
+    <mitre><id>T1547.006</id></mitre>
+    <group>kernel_module,rootkit_indicator,</group>
+  </rule>
+
+  <!-- 111121: file change under /lib/modules or /boot [FIM] -->
+  <rule id="111121" level="10">
+    <if_sid>550,553,554</if_sid>
+    <field name="syscheck.path" type="pcre2">(?i)^/(lib/modules|usr/lib/modules|boot)/</field>
+    <description>PrivEsc: kernel/boot path change on $(agent.name) - $(syscheck.path)</description>
+    <mitre><id>T1547.006</id></mitre>
+    <group>kernel_module,rootkit_indicator,</group>
+  </rule>
+
+  <!-- ===== ptrace / process injection [AUDIT key=rocky_priv_ptrace] ===== -->
+
+  <!-- 111130: ptrace attach to another process -->
+  <rule id="111130" level="10">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">rocky_priv_ptrace</field>
+    <description>PrivEsc: ptrace syscall on $(agent.name) - process injection / debugging of another process</description>
+    <mitre><id>T1055.008</id></mitre>
+    <group>process_injection,</group>
+  </rule>
+
+  <!-- ===== Linux capabilities [AUDIT key=rocky_priv_setcap] ===== -->
+
+  <!-- 111140: capability granted to a binary via setcap -->
+  <rule id="111140" level="11">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">rocky_priv_setcap</field>
+    <description>PrivEsc: file capability set via setcap on $(agent.name) - $(audit.command)</description>
+    <mitre><id>T1548.001</id></mitre>
+    <group>capability_abuse,</group>
+  </rule>
+
+  <!-- ===== Polkit / pkexec (CVE-2021-4034 PwnKit) [AUDIT key=rocky_priv_pkexec] -->
+
+  <!-- 111150: pkexec executed -->
+  <rule id="111150" level="10">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">rocky_priv_pkexec</field>
+    <description>PrivEsc: pkexec invoked on $(agent.name) - review for CVE-2021-4034 (PwnKit)</description>
+    <mitre><id>T1068</id></mitre>
+    <group>polkit_abuse,</group>
+  </rule>
+
+  <!-- 111151: pkexec executed close in time to repeated sudo failures.
+       FIX 2026-07-03: lowered L13 -> L10 and reworded. This composite CANNOT be
+       correlated to a single actor: the pkexec event (111150) carries only
+       audit.* fields while the sudo-failure event (5401) carries srcuser, so no
+       <same_field> can tie them together. As written it fires whenever ANY user
+       had 2 sudo failures in the window and ANY (often legitimate polkit) pkexec
+       then runs — a coincidence, not a strong indicator. Kept as a low-severity
+       "review" signal; the standalone 111150 remains the real pkexec detection. -->
+  <rule id="111151" level="10" frequency="2" timeframe="300">
+    <if_sid>111150</if_sid>
+    <if_matched_sid>5401</if_matched_sid>
+    <description>PrivEsc: pkexec invoked around the same time as repeated sudo failures on $(agent.name) - temporal coincidence, verify the acting user (possible PwnKit)</description>
+    <mitre><id>T1068</id><id>T1548.003</id></mitre>
+    <group>polkit_abuse,</group>
+  </rule>
+
+</group>

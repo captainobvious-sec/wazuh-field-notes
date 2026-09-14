@@ -37,9 +37,9 @@ They are not self-contained in this repository:
   and McAfee NSP IPS (`133xxx`) — **none of which ship here**. Those two rules cannot fire.
 - The Windows leg depends on `windows_normalize.xml` above, which does not load on
   4.14.x. Windows events therefore never participate.
-- What remains working is the Linux leg only: the `srcip` rules (`129000`, `129003`) and
-  the user rules (`129010`–`129013`) fire on SSH/PAM/sudo/su events from the stock
-  Linux rulesets.
+- What remains working is the Linux leg: the `srcip` rules (`129000`, `129003`) and the
+  user rules (`129010`–`129013`) fire on SSH/PAM/sudo/su events from the stock Linux
+  rulesets — and therefore alongside `rules/linux/`, which is shipped and supported.
 
 If you only run Linux agents alongside Windows, expect roughly half of this file to be
 inert. Deploy it knowingly, or use it as a template for your own correlation layer.

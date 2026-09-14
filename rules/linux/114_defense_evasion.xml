@@ -1,0 +1,146 @@
+<!--
+  Rocky Linux - Defense evasion / anti-forensics
+  Load order: 114_ (last of the detection set)
+  Custom ID range: 111400-111499
+
+  TELEMETRY PREREQUISITES (advanced tier):
+   * Command auditing (80792 / audit-wazuh-c) for the execve-content rules
+     (see the header of 113_lateral_movement.xml for the two supported wirings).
+   * FIM (syscheck) for the log-deletion / config / binary-replacement rules.
+  Validate with /var/ossec/bin/wazuh-logtest.
+-->
+<group name="defense_evasion,rocky_linux,correlation,">
+
+  <!-- ===== Audit subsystem tampering [AUDIT execve via 80792] ===== -->
+
+  <!-- 111400: auditd stopped or audit rules flushed.
+       FIX 2026-07-03: matched on the non-existent coalesced field audit.execve.
+       The auditd decoder only emits audit.execve.a0..a7, so this never fired.
+       Rewritten to <match> against the raw EXECVE argv tokens (a0="..." a1=...),
+       the same idiom the default 0850-audit_rules.xml uses. Verify with
+       wazuh-logtest on a real EXECVE event (argv spacing/hex-encoding varies). -->
+  <rule id="111400" level="14">
+    <if_sid>80792</if_sid>
+    <match type="pcre2">(?i)a\d+="systemctl"\s+a\d+="stop"\s+a\d+="auditd|a\d+="service"\s+a\d+="auditd"\s+a\d+="stop|a\d+="auditctl".*a\d+="-D|a\d+="pkill".*a\d+="[^"]*auditd|a\d+="killall".*a\d+="[^"]*auditd</match>
+    <description>Evasion: audit daemon stopped / rules flushed on $(agent.name) - logging being disabled</description>
+    <mitre><id>T1562.006</id><id>T1562.001</id></mitre>
+    <group>audit_tamper,</group>
+  </rule>
+
+  <!-- ===== SELinux tampering (Rocky = enforcing by default) ===== -->
+
+  <!-- 111410: SELinux set permissive/disabled at runtime [AUDIT execve] -->
+  <rule id="111410" level="13">
+    <if_sid>80792</if_sid>
+    <!-- FIX 2026-07-03: audit.execve -> <match> on raw argv (see 111400). -->
+    <match type="pcre2">(?i)a\d+="setenforce"\s+a\d+="(0|permissive)"</match>
+    <description>Evasion: SELinux set to permissive at runtime on $(agent.name) - MAC enforcement weakened</description>
+    <mitre><id>T1562.001</id></mitre>
+    <group>selinux_disabled,</group>
+  </rule>
+
+  <!-- 111411: SELinux config file changed (disable persists across reboot) [FIM] -->
+  <rule id="111411" level="13">
+    <if_sid>550,553,554</if_sid>
+    <field name="syscheck.path" type="pcre2">(?i)/etc/selinux/config</field>
+    <description>Evasion: SELinux config file changed on $(agent.name) - persistent MAC disable suspected</description>
+    <mitre><id>T1562.001</id></mitre>
+    <group>selinux_disabled,</group>
+  </rule>
+
+  <!-- ===== Firewall tampering (firewalld / nftables / iptables) [AUDIT] ===== -->
+
+  <!-- 111420: firewall stopped or ruleset flushed -->
+  <rule id="111420" level="12">
+    <if_sid>80792</if_sid>
+    <!-- FIX 2026-07-03: audit.execve -> <match> on raw argv (see 111400). -->
+    <match type="pcre2">(?i)a\d+="systemctl"\s+a\d+="stop"\s+a\d+="firewalld|a\d+="firewall-cmd".*a\d+="--panic-on|a\d+="nft"\s+a\d+="flush"\s+a\d+="ruleset|a\d+="ip6?tables"\s+a\d+="-F"</match>
+    <!-- ROUTING 2026-07-08: demoted to digest; maintenance flushes are common and
+         a host firewall stop is not in the same class as auditd/SELinux/agent kill
+         (which stay Tier-1: 111400 / 111410-11 / 111430). -->
+    <options>no_email_alert</options>
+    <description>Evasion: host firewall stopped/flushed on $(agent.name)</description>
+    <mitre><id>T1562.004</id></mitre>
+    <group>firewall_disabled,</group>
+  </rule>
+
+  <!-- ===== Security tooling removal [AUDIT execve via 80792] ===== -->
+
+  <!-- 111430: Wazuh/AIDE agent stopped or package removed -->
+  <rule id="111430" level="15">
+    <if_sid>80792</if_sid>
+    <!-- FIX 2026-07-03: audit.execve -> <match> on raw argv (see 111400). -->
+    <match type="pcre2">(?i)a\d+="(dnf|yum|rpm)".*a\d+="(remove|-e)".*a\d+="[^"]*(wazuh|aide)|a\d+="systemctl"\s+a\d+="stop"\s+a\d+="wazuh|a\d+="rm".*a\d+="[^"]*/var/ossec</match>
+    <description>Evasion: CRITICAL - security tooling (Wazuh/AIDE) stopped or removed on $(agent.name) - detection being disabled</description>
+    <mitre><id>T1562.001</id></mitre>
+    <group>security_tool_removal,</group>
+  </rule>
+
+  <!-- ===== Log / history anti-forensics [FIM] ===== -->
+
+  <!-- 111440: a file under /var/log was deleted/renamed [AUDIT key=rocky_evasion_logdel]
+       Uses an unlink/rename syscall watch (NOT FIM): catches deletion only,
+       so normal log appends do not generate noise. -->
+  <rule id="111440" level="13">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">rocky_evasion_logdel</field>
+    <!-- ROUTING 2026-07-08: demoted to digest; logrotate renames files under
+         /var/log routinely - confirm the rocky_evasion_logdel watch excludes it
+         before treating deletions as an interrupt. -->
+    <options>no_email_alert</options>
+    <description>Evasion: log file deleted/renamed under /var/log on $(agent.name) - $(audit.file.name)</description>
+    <mitre><id>T1070.002</id></mitre>
+    <group>log_deletion,anti_forensics,</group>
+  </rule>
+
+  <!-- 111441: shell history deleted [FIM 553 - deletion only to limit noise;
+       requires FIM scoped to /root and /home, see fim-directories.snippet] -->
+  <rule id="111441" level="11">
+    <if_sid>553</if_sid>
+    <field name="syscheck.path" type="pcre2">(?i)/\.(bash_history|zsh_history)$</field>
+    <description>Evasion: shell history deleted ($(syscheck.path)) on $(agent.name)</description>
+    <mitre><id>T1070.003</id></mitre>
+    <group>history_cleared,anti_forensics,</group>
+  </rule>
+
+  <!-- ===== Timestomping / clock manipulation [AUDIT execve] ===== -->
+
+  <!-- 111450: file timestamp manipulation via touch -->
+  <rule id="111450" level="11">
+    <if_sid>80792</if_sid>
+    <!-- FIX 2026-07-03: audit.execve -> <match> on raw argv; $(audit.execve) in
+         the description was also dead -> $(audit.command) (comm, decoded). -->
+    <match type="pcre2">(?i)a\d+="touch".*a\d+="(-t|-d|--date|-r)"</match>
+    <description>Evasion: file timestomping via touch on $(agent.name) - $(audit.command)</description>
+    <mitre><id>T1070.006</id></mitre>
+    <group>timestomping,anti_forensics,</group>
+  </rule>
+
+  <!-- 111460: system clock changed -->
+  <rule id="111460" level="11">
+    <if_sid>80792</if_sid>
+    <!-- FIX 2026-07-03: audit.execve -> <match> on raw argv (see 111400). -->
+    <match type="pcre2">(?i)a\d+="date"\s+a\d+="-s|a\d+="timedatectl"\s+a\d+="set-time|a\d+="hwclock"\s+a\d+="(--set|--systohc)"</match>
+    <description>Evasion: system clock changed on $(agent.name) - log timestamp manipulation</description>
+    <mitre><id>T1070.006</id></mitre>
+    <group>time_manipulation,anti_forensics,</group>
+  </rule>
+
+  <!-- ===== Binary replacement / trojanized system tools [FIM] ===== -->
+
+  <!-- 111470: a system binary was modified in place.
+       FIX 2026-07-03: lowered L13 -> L10. /bin,/sbin,/usr/bin,/usr/sbin are in
+       the default FIM set, so every `dnf update` rewrites dozens-to-hundreds of
+       these and fired L13 with no attack — a patch-day storm that trains
+       operators to ignore it. For a true high-severity signal, enable syscheck
+       whodata on these dirs and add a level-0 child when the modifying process
+       is dnf/rpm/systemd (syscheck.audit.process.name), then raise back to L13. -->
+  <rule id="111470" level="10">
+    <if_sid>550</if_sid>
+    <field name="syscheck.path" type="pcre2">(?i)^/(usr/)?(s)?bin/</field>
+    <description>Evasion: system binary modified in place ($(syscheck.path)) on $(agent.name) - verify against change window / patching</description>
+    <mitre><id>T1554</id><id>T1036.005</id></mitre>
+    <group>binary_replacement,</group>
+  </rule>
+
+</group>

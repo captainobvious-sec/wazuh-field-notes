@@ -1,0 +1,50 @@
+<!--
+  Centralized agent configuration for the ROCKY LINUX agent group.
+  Manager path:  /var/ossec/etc/shared/<linux_group>/agent.conf
+  Put the Rocky agents in their own group so Windows agents do NOT inherit this.
+  Agents pull it on the next sync (~ every 'notify_time'); confirm in the agent
+  /var/ossec/logs/ossec.log ("Agent configuration ... merged").
+-->
+<agent_config>
+
+  <!-- 1. Auth/syslog = working core (110_auth_correlation.xml) + sudo/su/PAM/useradd.
+       On Rocky these all land in /var/log/secure. Usually default; explicit here. -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/secure</location>
+  </localfile>
+
+  <!-- 2. auditd = EVERY auditd rule (111_, 113_, 114_). NOT enabled by default.
+       Without this line the execve/syscall detections have no input at all. -->
+  <localfile>
+    <log_format>audit</log_format>
+    <location>/var/log/audit/audit.log</location>
+  </localfile>
+
+  <!-- 3. FIM scope = every [FIM] rule. whodata="yes" needs auditd running and
+       the audit ruleset NON-immutable (-e 1, not -e 2). -->
+  <syscheck>
+    <disabled>no</disabled>
+
+    <directories check_all="yes" whodata="yes">/etc/sudoers,/etc/sudoers.d</directories>
+    <directories check_all="yes" whodata="yes">/etc/pam.d,/etc/security</directories>
+    <directories check_all="yes" realtime="yes">/etc/selinux</directories>
+    <directories check_all="yes" realtime="yes">/etc/ssh</directories>
+
+    <directories check_all="yes" whodata="yes">/root/.ssh</directories>
+    <!-- add one per service/admin user, e.g. /home/svc_app/.ssh -->
+
+    <directories check_all="yes" whodata="yes">/etc/cron.d,/etc/cron.daily,/etc/cron.hourly,/etc/cron.weekly,/etc/cron.monthly</directories>
+    <directories check_all="yes" whodata="yes">/etc/crontab,/var/spool/cron</directories>
+    <directories check_all="yes" realtime="yes">/etc/systemd/system,/usr/lib/systemd/system</directories>
+    <directories check_all="yes" realtime="yes">/etc/profile.d</directories>
+    <directories check_all="yes" realtime="yes" restrict="\.(bashrc|bash_profile|profile|bash_login|zshrc|bash_history)$">/root</directories>
+
+    <directories check_all="yes" realtime="yes">/boot</directories>
+    <directories check_all="yes">/lib/modules,/usr/lib/modules</directories>
+
+    <!-- scheduled (NOT realtime) - expect noise during dnf update/install -->
+    <directories check_all="yes" report_changes="no">/bin,/sbin,/usr/bin,/usr/sbin</directories>
+  </syscheck>
+
+</agent_config>

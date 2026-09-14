@@ -1,5 +1,39 @@
 # Changelog
 
+## v1.2.0 — Linux (Rocky / RHEL-family)
+
+### Added
+- **`rules/linux/`** — 40 rules, `111000`–`111470`, across five load-ordered files plus a
+  documentation-only tuning file. No custom decoders; everything chains onto the stock
+  sshd / PAM / syslog / auditd / syscheck rulesets.
+  - `110_auth_correlation.xml` — SSH brute-force-then-**success**, distributed brute
+    force, sudo and PAM escalation, off-hours and weekend logins, privileged-group adds
+  - `111_privilege_escalation.xml` — sudoers, SUID/SGID, kernel modules, ptrace, setcap,
+    pkexec (PwnKit)
+  - `112_persistence.xml` — authorized_keys, cron, systemd units, shell profiles, PAM
+    modules, attack tools on disk
+  - `113_lateral_movement.xml` — scanners, reverse/bind shells, service-account shells,
+    SSH pivoting, shadow and SSH-key reads
+  - `114_defense_evasion.xml` — auditd/SELinux/firewall tampering, Wazuh removal, log and
+    history deletion, timestomping, binary replacement
+  - `115_alert_tuning.xml` — notes and one staged composite, zero active rules
+- **`ingest/linux/`** — the collection config the advanced tier needs: shared `agent.conf`,
+  the auditd ruleset whose keys the rules match on, and a `<syscheck>` scope.
+- **`dashboards/linux/`** — security and syslog dashboards (29 saved objects).
+- **`docs/linux.md`** — the two-tier split, the `audit.key` contract, and the gotchas that
+  cost the most time: `if_sid` matches the *same* event rather than "afterwards",
+  `frequency` fires around the (N+4)th event and `frequency="1"` is rejected outright,
+  static fields need `<same_srcip />` rather than `<same_field>`, and `if_matched_*`
+  composites cannot be exercised in `wazuh-logtest`.
+
+### Note on coverage
+8 of the 40 rules are a syslog core that works on a default agent. The other 32 need
+auditd and/or FIM and stay silent without `ingest/linux/` — this is called out in the
+README, `docs/linux.md` and `ingest/README.md` rather than left to be discovered.
+
+The Linux leg of `experimental/cross_device_correlation.xml` now has shipped rules behind
+it; its Windows and appliance legs remain unavailable.
+
 ## v1.1.0 — Publication cleanup
 
 ### Fixed

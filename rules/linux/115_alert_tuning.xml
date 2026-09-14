@@ -1,0 +1,68 @@
+<!-- ============================================================
+     Alert-tiering notes & staged composite — Rocky Linux
+     Created 2026-07-08 (alerting-discipline review).
+     ID block 111500-111599 (previously unused).
+
+     This file is intentionally light: the Linux Tier-1 set is already expressed
+     as atomic rules (111020/111021/111022 auth takeover, 111100 sudoers, 111240
+     PAM, 111410/111411 SELinux, plus the dormant 111400/111430/111310/111200).
+     Only the multi-event correlation (C12) and a couple of documentation notes
+     live here.
+     ============================================================ -->
+<group name="rocky_linux,alert_tuning,">
+
+  <!-- ===== DEFERRED default demotes (documentation only) =====
+       These default rules email today (level 12) but are low-value/low-volume, so
+       they were NOT demoted in-place to avoid restating their compliance-group
+       tags via overwrite. Demote later if their volume ever justifies it, by adding
+       no_email_alert to each in its default file (or an overwrite here):
+         40101  login by a system user ($SYS_USERS)          - script su to svc accts
+         5108   system running out of memory                 - ops monitoring, not SIEM
+         2937 / 2938 / 2939  SCSI/RAID disk failures          - ops monitoring, not SIEM
+         80740  auditd replay attack (CRYPTO_REPLAY_USER)     - obscure, FP-prone
+       (5108/2937-2939/80740 are availability/ops signals better handled by the
+        infrastructure-monitoring stack than by a security email.) -->
+
+  <!-- ===== C12 — STAGED (NOT LOADED): privileged-group add shortly after a
+       suspicious auth event (the user's "fail -> new admin -> ..." chain) =====
+
+       Two build constraints shape this:
+       1) if_matched_group is fine in PRODUCTION (it only fails to accumulate inside
+          wazuh-logtest). Either operator works on the live manager; this draft uses
+          if_matched_sid - which takes exactly ONE rule id - for a precise,
+          logtest-testable chain.
+       2) Wazuh frequency composites are PAIRWISE and have no host-scoping operator
+          that is confirmed on this build, so a single rule cannot safely express
+          "...on the SAME host" across a usermod event and an SSH-failure event.
+
+       RECOMMENDED IMPLEMENTATION (robust, no exotic operators):
+       keep each leg as its own TIER-1 atomic rule so the SEQUENCE is visible on
+       the dashboard within one incident timeline, even though no single composite
+       fires the whole chain:
+         - 111020/111000  (successful auth after a failure burst)   already Tier-1
+         - 111030         (user added to wheel/sudo/adm)            promote to email
+         - 111100/111240  (sudoers / PAM change)                    already Tier-1
+       That gives you the same investigative signal the composite would, without a
+       fragile pairwise correlation.
+
+       If you still want a single fired alert, validate this draft with
+       wazuh-logtest first (confirm if_matched_sid accumulation across the two
+       source rules on one agent), then move it into a <group> and analysisd -t:
+
+       DRAFT FIXED 2026-07-08: frequency="1" is REJECTED by this build (valid
+       range 2..9999 — the documented cause of the cryptic API "1113 XML syntax
+       error"). frequency="2" is the legal minimum, but it means TWO prior 111000
+       events are required before 111030 fires this — a single takeover login
+       followed by a group add will NOT trip it. That constraint is exactly why
+       the atomic-rules implementation above is the recommended one.
+
+       <rule id="111500" level="13" frequency="2" timeframe="600">
+         <if_sid>111030</if_sid>
+         <if_matched_sid>111000</if_matched_sid>
+         <description>PrivEsc chain: user added to a privileged group on $(agent.name) shortly after a brute-force-then-success login — probable hands-on-keyboard escalation</description>
+         <mitre><id>T1078</id><id>T1098</id></mitre>
+         <group>privilege_escalation,attack_success,correlation,</group>
+       </rule>
+  -->
+
+</group>

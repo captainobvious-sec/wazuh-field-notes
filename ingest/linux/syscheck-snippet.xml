@@ -1,0 +1,36 @@
+<!--
+  Rocky Linux FIM (syscheck) scope for the "advanced tier" file detections.
+  Add inside the existing syscheck block of the agent ossec.conf
+  (or push via a Rocky agent group in the manager's shared agent.conf).
+
+  realtime="yes"  = inotify, near-instant (use for small, sensitive dirs)
+  whodata="yes"   = realtime + which user/process made the change (needs auditd)
+  Avoid realtime on /usr/bin etc. (thousands of files) - use scheduled scan there.
+  report_changes="no" on bin dirs keeps alert volume sane (no diff content).
+-->
+<syscheck>
+  <!-- privilege / auth config (rules 111100, 111240, 111411) -->
+  <directories check_all="yes" whodata="yes">/etc/sudoers,/etc/sudoers.d</directories>
+  <directories check_all="yes" whodata="yes">/etc/pam.d,/etc/security</directories>
+  <directories check_all="yes" realtime="yes">/etc/selinux</directories>
+  <directories check_all="yes" realtime="yes">/etc/ssh</directories>
+
+  <!-- SSH keys / authorized_keys (rule 111200) -->
+  <directories check_all="yes" whodata="yes">/root/.ssh</directories>
+  <!-- add one per service/admin user, e.g. /home/svc_app/.ssh -->
+
+  <!-- persistence locations (rules 111210, 111220, 111221, 111230) -->
+  <directories check_all="yes" whodata="yes">/etc/cron.d,/etc/cron.daily,/etc/cron.hourly,/etc/cron.weekly,/etc/cron.monthly</directories>
+  <directories check_all="yes" whodata="yes">/etc/crontab,/var/spool/cron</directories>
+  <directories check_all="yes" realtime="yes">/etc/systemd/system,/usr/lib/systemd/system</directories>
+  <directories check_all="yes" realtime="yes">/etc/profile.d</directories>
+  <directories check_all="yes" realtime="yes" restrict="\.(bashrc|bash_profile|profile|bash_login|zshrc|bash_history)$">/root</directories>
+
+  <!-- kernel / boot (rule 111121) -->
+  <directories check_all="yes" realtime="yes">/boot</directories>
+  <directories check_all="yes">/lib/modules,/usr/lib/modules</directories>
+
+  <!-- system binaries: scheduled scan, not realtime (rules 111111, 111250, 111470)
+       expect noise during dnf update/install windows - tune or correlate with patching -->
+  <directories check_all="yes" report_changes="no">/bin,/sbin,/usr/bin,/usr/sbin</directories>
+</syscheck>

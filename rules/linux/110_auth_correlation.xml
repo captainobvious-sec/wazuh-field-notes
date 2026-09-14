@@ -1,0 +1,164 @@
+<!--
+  Rocky Linux - Authentication correlation
+  Load order: 110_ (loads after the default ruleset, before privesc/persistence)
+  Custom ID range: 111000-111099
+  Telemetry: pure syslog (sshd 0095, sudo/su/useradd in 0020, PAM in 0085).
+             Works on a default agent - NO auditd/FIM required.
+
+  Design note: "B after A" is expressed the Wazuh way:
+    if_sid           = the CURRENT event (e.g. a successful login)
+    if_matched_sid + frequency/timeframe = A happened recently
+    same_srcip / same_user = correlate the two by a shared field.
+  This replaces the old broken pattern (if_sid freq-rule + match on another event),
+  which required one log line to be two different events at once.
+-->
+<group name="authentication,rocky_linux,correlation,">
+
+  <!-- =====
+       SSH brute force then success
+       Default 0095 already alerts on the brute force itself
+       (5712 invalid-user BF, 5763 failed-password BF, 5720 multi-fail).
+       What it does NOT do is flag a SUCCESS that follows the attack -
+       that is the high-value signal, added below.
+       ===== -->
+
+  <!-- 111000: successful SSH auth from an IP that just failed several times.
+       SHADOW / TUNING 2026-07-08 (revised):
+       - Default 40112 (auth success after failures) DOES fire in production - the
+         earlier "inert" note was wrong; if_matched_group composites work on the
+         live manager, they just don't accumulate inside wazuh-logtest. So 40112
+         can out-rank this rule for the same success event. To make 111000 win (so
+         its root child 111001 can fire), level is raised 12->13: it loads after
+         40112 and a strictly higher level wins the event. If a live 4624 test
+         shows 40112 still winning, re-parent 111000 under 40112 instead
+         (child-overrides-parent). Confirm on a live agent.
+       - Lowered frequency 8->3, timeframe 120->300s. With the empirical OSSEC
+         "fires around the (N+4)th matching event" quirk, frequency=8 effectively
+         needed ~12 failures, so a real ~8-failure burst-then-success (e.g. the
+         198.51.100.77 root sample) never tripped it. freq=3 (effective ~7) fires
+         on that sample and on realistic brute-then-success, above casual mistypes.
+       Tier-1 (emails by level); 111001 (root) chains from it. -->
+  <rule id="111000" level="13" frequency="3" timeframe="300">
+    <if_sid>5715</if_sid>
+    <if_matched_sid>5760</if_matched_sid>
+    <same_srcip />
+    <description>SSH: login SUCCEEDED from $(srcip) after a brute-force burst on $(agent.name) - account likely compromised</description>
+    <mitre><id>T1110.001</id><id>T1078</id></mitre>
+    <group>brute_force,attack_success,authentication_success,</group>
+  </rule>
+
+  <!-- 111001: the successful login above was to root -->
+  <rule id="111001" level="14">
+    <if_sid>111000</if_sid>
+    <match>for root from</match>
+    <description>SSH: ROOT login succeeded from $(srcip) after brute force on $(agent.name)</description>
+    <mitre><id>T1110.001</id><id>T1078.003</id></mitre>
+    <group>brute_force,attack_success,root_login,</group>
+  </rule>
+
+  <!-- 111002: distributed brute force - same target user, many source IPs -->
+  <rule id="111002" level="11" frequency="8" timeframe="300">
+    <if_matched_sid>5760</if_matched_sid>
+    <same_user />
+    <different_srcip />
+    <description>SSH: distributed brute force against user $(dstuser) from multiple IPs on $(agent.name)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>brute_force,distributed_attack,</group>
+  </rule>
+
+  <!-- =====
+       Sudo - password guessing then success
+       5401 = failed sudo, 5402 = successful sudo to ROOT (0020 syslog rules).
+       Default 5404 already fires on 3 failed sudo; we add the SUCCESS-after.
+       ===== -->
+
+  <!-- 111010: sudo to root succeeded for a user who just failed sudo.
+       FIX 2026-07-03: frequency 3/120s -> 2/300s. 5401 matches sudo's
+       end-of-invocation "N incorrect password attempts" SUMMARY line (one per
+       failed sudo invocation, each of which already involves up to 3 password
+       prompts plus sudo's built-in delay), so requiring 3 such lines + a
+       success inside 120s was rarely reachable. 2 failed invocations within
+       5 min then a success keeps the intent and actually fires. -->
+  <!-- FIX 2026-07-04 (live-validated): also chain 5403 "first time user executed
+       sudo" - a first-ever sudo after repeated failures is exactly the escalation
+       this rule targets, and stock fires 5403 (not 5402) for it. -->
+  <rule id="111010" level="12" frequency="2" timeframe="300">
+    <if_sid>5402,5403</if_sid>
+    <if_matched_sid>5401</if_matched_sid>
+    <same_srcuser />
+    <!-- ROUTING 2026-07-08: demoted to dashboard; an admin mistyping the sudo
+         password once or twice then succeeding is routine. -->
+    <options>no_email_alert</options>
+    <description>Sudo: $(srcuser) escalated to root after repeated sudo failures on $(agent.name)</description>
+    <mitre><id>T1548.003</id></mitre>
+    <group>privilege_escalation,attack_success,</group>
+  </rule>
+
+  <!-- =====
+       PAM / su / login - failures then a session opens
+       Covers su, console login and any pam_unix service. su failures are
+       logged by PAM as 5503; a successful session is 5501. (5551 is itself
+       the default "multiple PAM failures" aggregate - do NOT count it.)
+       ===== -->
+
+  <!-- 111020: PAM session opened for a user with a recent failure burst.
+       FIX 2026-07-03: exclude crond. On Rocky the default Debian-format ignore
+       rule 5521 does not catch `pam_unix(crond:session): session opened`, so
+       root's periodic cron jobs satisfied if_sid 5501 and (with any 5503
+       failures for root in the window) produced L12/L13 "brute force succeeded"
+       false positives every few minutes. Constraining to interactive PAM
+       services removes the cron noise while keeping su/login/sshd/sudo/gdm. -->
+  <rule id="111020" level="12" frequency="5" timeframe="120">
+    <if_sid>5501</if_sid>
+    <if_matched_sid>5503</if_matched_sid>
+    <same_user />
+    <program_name type="pcre2">^(sshd|login|su|sudo|gdm|gdm-password|sddm|systemd-user)</program_name>
+    <description>Auth: session opened for $(user) after repeated PAM failures on $(agent.name) - su/login brute force succeeded</description>
+    <mitre><id>T1110</id><id>T1078</id></mitre>
+    <group>authentication_success,attack_success,</group>
+  </rule>
+
+  <!-- 111021: that successful-after-failure login happened off-hours -->
+  <rule id="111021" level="13">
+    <if_sid>111020</if_sid>
+    <time>22:00-06:00</time>
+    <description>Auth: off-hours login after failures for $(user) on $(agent.name)</description>
+    <mitre><id>T1078</id></mitre>
+    <group>after_hours_login,suspicious_login,</group>
+  </rule>
+
+  <!-- 111022: that successful-after-failure login happened on a weekend -->
+  <rule id="111022" level="12">
+    <if_sid>111020</if_sid>
+    <weekday>weekends</weekday>
+    <description>Auth: weekend login after failures for $(user) on $(agent.name)</description>
+    <mitre><id>T1078</id></mitre>
+    <group>after_hours_login,suspicious_login,</group>
+  </rule>
+
+  <!-- =====
+       Account management (useradd/usermod/gpasswd to 5901/5902/5904, group adduser)
+       ===== -->
+
+  <!-- 111030: a user was added to a privileged group (wheel/sudo/adm).
+       FIX 2026-07-03: the old form (if_group adduser + match wheel|sudo|adm)
+       was dead for its purpose — `usermod -aG wheel X` and `gpasswd -a X wheel`
+       do NOT enter the `adduser` group, and the bare `adm` substring only
+       matched by coincidence (e.g. a username like admbackup). Rewritten to
+       anchor on the usermod/gpasswd programs and the actual "add to group"
+       message, with the group names anchored (no bare-substring FPs).
+       NEEDS wazuh-logtest against a real Rocky 10 usermod/gpasswd line to
+       confirm the exact message wording. -->
+  <rule id="111030" level="10">
+    <program_name type="pcre2">^(usermod|gpasswd|groupmems)</program_name>
+    <match type="pcre2">(?i)(add '?[^' ]+'? to (shadow )?group '?(wheel|sudo|adm)'?|added by \S+ to group (wheel|sudo|adm)\b)</match>
+    <description>Account: user added to a privileged group (wheel/sudo/adm) on $(agent.name)</description>
+    <mitre><id>T1136.001</id><id>T1098</id></mitre>
+    <group>account_manipulation,privilege_escalation,</group>
+  </rule>
+
+  <!-- (removed 111031 "new user then login": if_matched_sid counts a one-time
+       useradd event, which can't satisfy frequency>=2. Default rule 5902 already
+       alerts on user creation.) -->
+
+</group>

@@ -1,7 +1,34 @@
 # Ingest
 
-Collection-side configuration. These files get UniFi log lines into a shape the
-decoders in `decoders/` can actually parse. Nothing here runs on the Wazuh manager.
+Collection-side configuration — what has to be true on the agents and relays before the
+rules have anything to fire on.
+
+## Linux
+
+The Linux syslog core works on a default agent. The other 32 rules do not: they need
+auditd and a FIM scope that a stock agent does not have.
+
+| File | Install to | Gates |
+|---|---|---|
+| `linux/agent.conf.snippet.xml` | manager: `/var/ossec/etc/shared/<linux_group>/agent.conf` | everything — `/var/log/secure`, `/var/log/audit/audit.log`, and the FIM scope in one place |
+| `linux/wazuh-linux.rules` | agent: `/etc/audit/rules.d/wazuh-linux.rules` | every `[AUDIT]` rule |
+| `linux/syscheck-snippet.xml` | agent: merge into `<syscheck>` in `ossec.conf` | every `[FIM]` rule — an **alternative** to the agent.conf route, not an addition |
+
+Put Linux agents in their own agent group first, or Windows agents inherit the FIM scope.
+
+```bash
+# on each Linux agent
+sudo install -m 640 linux/wazuh-linux.rules /etc/audit/rules.d/wazuh-linux.rules
+sudo augenrules --load && sudo auditctl -l      # confirm the rules are loaded
+```
+
+Then put `linux/agent.conf.snippet.xml` into the group's `agent.conf` on the manager and
+restart `wazuh-manager`. Agents pull it on the next sync — confirm in the agent's
+`/var/ossec/logs/ossec.log` ("Agent configuration ... merged").
+
+`whodata="yes"` needs auditd running **and** a non-immutable audit ruleset (`-e 1`, not
+`-e 2`). The `audit.key` values in `wazuh-linux.rules` must match the
+`<field name="audit.key">` values in `rules/linux/` exactly — rename in both or neither.
 
 ## UniFi
 
