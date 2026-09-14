@@ -38,18 +38,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - wazuh: "4.14.3"   # the version this set is validated on
+          - wazuh: "4.14.3"        # the version this set is validated on
             advisory: false
-          - wazuh: "latest"   # early warning for the next release
+          - wazuh: "4.14.7"        # newest 4.14.x — advisory
+            advisory: true
+          - wazuh: "5.0.0-beta5"   # early warning for the 5.x break — advisory
             advisory: true
     steps:
       - uses: actions/checkout@v4
 
       - name: Load the deployed ruleset and validate
         run: |
-          docker run --rm -v "$PWD:/repo:ro" \
-            wazuh/wazuh-manager:${{ matrix.wazuh }} bash -c '
+          docker run --rm --entrypoint bash -v "$PWD:/repo:ro" \
+            wazuh/wazuh-manager:${{ matrix.wazuh }} -c '
               set -euo pipefail
+              mkdir -p /var/ossec/etc/rules /var/ossec/etc/decoders
               install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml    /var/ossec/etc/rules/
               install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml /var/ossec/etc/decoders/
               /var/ossec/bin/wazuh-analysisd -t
@@ -62,14 +65,15 @@ jobs:
         # becoming loadable and misleading the README.
         continue-on-error: true
         run: |
-          if docker run --rm -v "$PWD:/repo:ro" \
-               wazuh/wazuh-manager:${{ matrix.wazuh }} bash -c '
+          if docker run --rm --entrypoint bash -v "$PWD:/repo:ro" \
+               wazuh/wazuh-manager:${{ matrix.wazuh }} -c '
+                 mkdir -p /var/ossec/etc/rules /var/ossec/etc/decoders
                  install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml /var/ossec/etc/rules/
                  install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml /var/ossec/etc/decoders/
                  install -o wazuh -g wazuh -m 660 /repo/experimental/windows_normalize.xml \
                          /var/ossec/etc/decoders/
                  /var/ossec/bin/wazuh-analysisd -t
-               ' 2>/dev/null; then
+               ' >/dev/null 2>&1; then
             echo "::warning::windows_normalize.xml now LOADS on ${{ matrix.wazuh }} — experimental/README.md is out of date"
           else
             echo "still rejected on ${{ matrix.wazuh }}, as documented"

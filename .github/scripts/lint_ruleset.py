@@ -30,10 +30,22 @@ FORBIDDEN = re.compile(
 )
 
 findings = []
+warnings = []
+
+# Wazuh uses PCRE2; Python's re is close but not identical. The known divergence
+# is inline flag groups: PCRE2 allows (?i) anywhere and applies it from that point
+# on, while Python's re rejects it away from the start (hard error since 3.11).
+# Neutralise them before the compile check so we still catch genuinely malformed
+# patterns without failing on PCRE2-legal ones.
+INLINE_FLAGS = re.compile(r"\(\?[aiLmsux]+\)")
 
 
 def note(category, path, line, msg):
     findings.append((category, f"{path}:{line}" if line else str(path), msg))
+
+
+def warn(category, path, line, msg):
+    warnings.append((category, f"{path}:{line}" if line else str(path), msg))
 
 
 def strip_comments(text):
@@ -95,8 +107,12 @@ def check_rules():
                          "field; use the <same_*/> operator instead")
 
             for rx in re.findall(r'type="pcre2">(.*?)</', body, re.S):
+                if INLINE_FLAGS.search(rx) and not rx.startswith("(?"):
+                    warn("regex-style", rel(p), line,
+                         f"rule {rid}: inline flag group away from the start. Legal "
+                         "in PCRE2 (applies from that point on), but clearer at the front")
                 try:
-                    re.compile(rx)
+                    re.compile(INLINE_FLAGS.sub("", rx))
                 except re.error as exc:
                     note("regex", rel(p), line, f"rule {rid}: {exc}")
 
@@ -170,10 +186,15 @@ def main():
     check_dashboards()
     check_forbidden()
 
+    for category, where, msg in warnings:
+        print(f"warning  {where}: {msg}")
+    if warnings:
+        print()
+
     if not findings:
         print(f"OK  {len(paths)} XML files, "
               f"{len(list((ROOT / 'dashboards').rglob('*.ndjson')))} dashboards, "
-              "no structural findings")
+              f"no structural findings ({len(warnings)} warning(s))")
         return 0
 
     width = max(len(c) for c, _, _ in findings)
