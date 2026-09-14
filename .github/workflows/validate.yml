@@ -76,9 +76,16 @@ jobs:
           done
 
           if ! docker exec "$cid" test -f /var/ossec/etc/internal_options.conf; then
-            echo "::error::/var/ossec/etc never populated — image layout may have changed"
-            docker exec "$cid" find / -name internal_options.conf 2>/dev/null | head || true
-            docker logs "$cid" 2>&1 | tail -30
+            # Distinguish "could not test" from "test failed". 5.x images refuse to
+            # start without TLS certs mounted, so the ruleset is never exercised —
+            # reporting that as a break would be a permanently red, meaningless
+            # signal. Advisory versions skip; the pinned version still fails.
+            docker logs "$cid" 2>&1 | tail -20
+            if [ "${{ matrix.advisory }}" = "true" ]; then
+              echo "::notice::SKIPPED — ${IMG} never finished starting, so the ruleset was not exercised. Not a ruleset failure."
+              exit 0
+            fi
+            echo "::error::/var/ossec/etc never populated on ${IMG} — image layout may have changed"
             exit 1
           fi
 
