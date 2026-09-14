@@ -51,11 +51,17 @@ jobs:
         run: |
           docker run --rm --entrypoint bash -v "$PWD:/repo:ro" \
             wazuh/wazuh-manager:${{ matrix.wazuh }} -c '
-              set -euo pipefail
-              mkdir -p /var/ossec/etc/rules /var/ossec/etc/decoders
-              install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml    /var/ossec/etc/rules/
-              install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml /var/ossec/etc/decoders/
-              /var/ossec/bin/wazuh-analysisd -t
+              set -uo pipefail
+              # analysisd resolves etc/internal_options.conf relative to its own
+              # home, so it must be run from /var/ossec, not from /.
+              cd /var/ossec
+              echo "--- cwd: $(pwd)"
+              ls -1 etc/internal_options.conf 2>&1 || { echo "--- etc/:"; ls -1 etc/ | head -20; }
+              mkdir -p etc/rules etc/decoders
+              install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml    etc/rules/
+              install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml etc/decoders/
+              echo "--- loaded: $(ls -1 etc/rules/*.xml | wc -l) rule files, $(ls -1 etc/decoders/*.xml | wc -l) decoder files"
+              ./bin/wazuh-analysisd -t
             '
 
       - name: Confirm experimental/ is still rejected
@@ -67,12 +73,12 @@ jobs:
         run: |
           if docker run --rm --entrypoint bash -v "$PWD:/repo:ro" \
                wazuh/wazuh-manager:${{ matrix.wazuh }} -c '
-                 mkdir -p /var/ossec/etc/rules /var/ossec/etc/decoders
-                 install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml /var/ossec/etc/rules/
-                 install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml /var/ossec/etc/decoders/
-                 install -o wazuh -g wazuh -m 660 /repo/experimental/windows_normalize.xml \
-                         /var/ossec/etc/decoders/
-                 /var/ossec/bin/wazuh-analysisd -t
+                 cd /var/ossec
+                 mkdir -p etc/rules etc/decoders
+                 install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml etc/rules/
+                 install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml etc/decoders/
+                 install -o wazuh -g wazuh -m 660 /repo/experimental/windows_normalize.xml etc/decoders/
+                 ./bin/wazuh-analysisd -t
                ' >/dev/null 2>&1; then
             echo "::warning::windows_normalize.xml now LOADS on ${{ matrix.wazuh }} — experimental/README.md is out of date"
           else
