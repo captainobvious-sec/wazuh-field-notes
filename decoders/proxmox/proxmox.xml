@@ -20,8 +20,8 @@
      a rule's no_full_log strips full_log, so VM/CT lifecycle events (which store
      an empty full_log) still get data.pve.* populated.
 
-     DEPLOY (homelab/test manager only — optional / opt-in):
-       cp Homelab/proxmox_pve_pbs_decoders.xml /var/ossec/etc/decoders/
+     DEPLOY (optional / opt-in):
+       cp decoders/proxmox/proxmox.xml /var/ossec/etc/decoders/
        /var/ossec/bin/wazuh-analysisd -t          # validate
        /var/ossec/bin/wazuh-control restart
      TEST (paste a sample line):
