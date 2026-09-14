@@ -10,6 +10,8 @@ agent, so logs are forwarded via a syslog relay to a host that does. UniFi emits
 |---|---|---|
 | `rules/unifi/unifi.xml` | 100700–100765 | Firewall LAN→WAN / inter-VLAN drops, IDS/IPS signatures, WiFi RADIUS auth & brute-force, admin config changes, SSH |
 | `decoders/unifi/unifi.xml` | — | CEF base + KV fields, LAN_LAN / LAN_WAN firewall, hostapd (RADIUS/STA) decoders |
+| `ingest/unifi/10-unifi.conf` | — | rsyslog relay: rewrites double-headed CEF to one clean header |
+| `ingest/unifi/localfile-snippet.xml` | — | agent `<localfile>` for `/var/log/unifi/unifi.log` |
 
 ## Decoder field names
 Rules use the verbatim decoded field names (no `data.` prefix, no `.keyword` suffix):
@@ -23,7 +25,8 @@ Rules use the verbatim decoded field names (no `data.` prefix, no `.keyword` suf
 Clean UniFi CEF arrives with `program_name="CEF"`, but forwarded UniFi OS lines can have
 a double timestamp, so the predecoder picks up the second timestamp's date-hour as the
 program_name. The base decoder matches both (`^CEF$` or `^\d{4}-\d{2}-\d{2}T\d{2}$`)
-with an `Ubiquiti` content guard.
+with an `Ubiquiti` content guard. `ingest/unifi/10-unifi.conf` fixes it at the relay
+instead, which is cleaner — the decoder tolerance is the safety net.
 
 ### UniFi OS has no `src=` field
 On UniFi OS (e.g. UNAS), the real client/admin IP is only inside `msg` as

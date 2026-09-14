@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.1.0 — Publication cleanup
+
+### Fixed
+- **`windows_normalize.xml` no longer sits in the deploy path.** It is rejected by Wazuh
+  4.14.x (`Parent decoder name invalid: windows_eventchannel` — plugin decoders take no
+  XML children), which makes `wazuh-analysisd -t` fail and blocks a manager restart. Moved
+  to `experimental/` with the tested failure documented; the old `decoders/common/README.md`
+  had described it as merely optional.
+- **`cross_device_correlation.xml` moved to `experimental/`.** Rules 129001/129002 chain
+  onto ESXi/vCenter/McAfee appliance rulesets that this repo does not ship, and its Windows
+  leg depends on the decoder above. Only the Linux leg works; that is now stated up front.
+- **Dashboard index-pattern ids replaced with placeholders.** The Windows exports carried
+  one manager's ids, inconsistently: `01`/`02`/`04` used the legacy double-prefixed
+  `index-pattern:wazuh-alerts-*` while `03` used `wazuh-alerts-*`, so at least one file
+  could not resolve its references on import anywhere. Now `WAZUH_ALERTS_IP_ID` /
+  `WAZUH_MONITORING_IP_ID`, with substitution documented in `dashboards/README.md`.
+- **Stale cross-references removed** — comments pointed at an internal deploy script and at
+  sibling filenames from a different repository layout (`104-ad_correlation_rules.xml`,
+  `107-alert_tuning_windows.xml`, `Linux/0110-rocky_auth_correlation.xml`, and others).
+
+### Added
+- `NOTICE.md` — GPLv2 provenance for the stock rule bodies reproduced under
+  `overwrite="yes"` in `103_`, `104_` and `108_`. Those three files are GPLv2; the rest of
+  the repository stays MIT.
+- `ingest/unifi/` — the rsyslog relay config that fixes UniFi's double CEF header, plus the
+  agent `<localfile>` snippet. `docs/unifi.md` described this step but shipped no config.
+- `dashboards/README.md` — import procedure, field-schema check, timezone note.
+- `.gitattributes` — normalizes line endings (one rule file had shipped as CRLF).
+
 ## v1.0.0 — Initial public release
 
 Custom Wazuh rules, decoders, and dashboards for Windows/AD, Proxmox VE+PBS, UniFi,

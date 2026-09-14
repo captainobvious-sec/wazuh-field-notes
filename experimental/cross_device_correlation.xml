@@ -5,8 +5,10 @@
 
      SCOPE / DESIGN
      This file is the CROSS-DEVICE layer. It correlates auth + attack activity
-     that spans the appliances (ESXi 120xxx, vCenter 121xxx, McAfee NSP IPS
-     133xxx) together with the Linux defaults.
+     that spans the Linux defaults with appliance rulesets (ESXi 120xxx, vCenter
+     121xxx, McAfee NSP IPS 133xxx).
+     ⚠ Those appliance rules are NOT shipped in this repository, so 129001/129002
+     cannot fire here. See experimental/README.md before deploying.
      FIELD NOTE (corrected 2026-07-03): srcip is shared and reliable. The
      USERNAME is NOT uniformly srcuser — the ssh/pam default decoders emit the
      account as `user` (→ data.dstuser) for valid-user auth, and only use
@@ -16,10 +18,10 @@
      exact Linux field with `wazuh-logtest` on a real 5503/5716 line and prune
      whichever twin does not populate.
 
-     It deliberately does NOT duplicate the existing per-platform correlation:
-       - Linux-internal  : Linux/0110-rocky_auth_correlation.xml (111xxx),
-                           Linux/0111-rocky_privesc_correlation.xml
-       - Windows-internal: 104-ad_correlation_rules.xml (100xxx)
+     It deliberately does NOT duplicate per-platform correlation, which lives
+     in the platform rule files:
+       - Windows : rules/windows/104_ad_correlation.xml (100xxx)
+       - Linux   : your own Linux correlation rules (111xxx) — not shipped here
 
      WINDOWS BARRIER (important): Windows AD failed/again-success logons DO carry
      the authentication_failed / authentication_success groups, but natively they
@@ -27,19 +29,17 @@
      NOT data.srcip / data.srcuser, and Wazuh <same_field> requires identical
      field names on both events. The companion decoder windows_normalize_decoders.xml
      BRIDGES this: it adds srcip/srcuser to failed logons (eventID 4625) so the
-     srcip/srcuser rules below DO include Windows once it is active. Windows actor
-     correlation also lives in 104-ad_correlation_rules.xml.
-     ⚠ windows_normalize is a child of the built-in windows_eventchannel decoder
-     and MUST be validated on the manager (wazuh-logtest with a real 4625 line —
-     confirm a populated srcip/srcuser AND that win.* fields are still present). If
-     it does not populate srcip on your build, these rules silently fall back to
-     Linux + appliances only (no false joins) until it is fixed or removed.
+     srcip/srcuser rules below WOULD include Windows if it were active. Windows actor
+     correlation also lives in rules/windows/104_ad_correlation.xml.
+     ⚠ windows_normalize.xml DOES NOT LOAD on Wazuh 4.14.x (plugin decoders take no
+     XML children), so the Windows leg does not exist and these rules fall back to
+     Linux + appliances only (no false joins). See experimental/README.md.
 
      Validated default rule IDs (read from the root rule folders):
        SSH 5710/5716 (authentication_failed), 5712 (brute force), 5715 (success);
        PAM 5503 (failed) / 5501 (success); sudo 5401/5402; su 5303/5305.
-     Composite pattern matches the in-env convention in 0110-rocky_auth_correlation
-     (<if_sid>/<if_group> = current event, <if_matched_*>+frequency = history).
+     Composite pattern: <if_sid>/<if_group> = current event,
+     <if_matched_*>+frequency = history.
      ============================================================ -->
 <!-- FIX 2026-07-04 (found live on test manager v4.14.3): every composite in this
      file used <same_field> on srcip/srcuser/dstuser. Those are STATIC fields -
@@ -49,7 +49,7 @@
        same_field srcip   -> <same_srcip />
        same_field srcuser -> <same_srcuser />
        same_field dstuser -> <same_user />  (same_user compares dstuser)
-     ALSO validated live: windows_normalize_decoders.xml is REJECTED by 4.14.3
+     ALSO validated live: windows_normalize.xml is REJECTED by 4.14.3
      ("Parent decoder name invalid: windows_eventchannel" - plugin decoders take
      no XML children), so the Windows leg of these rules does NOT exist; they
      correlate Linux + appliances only. -->

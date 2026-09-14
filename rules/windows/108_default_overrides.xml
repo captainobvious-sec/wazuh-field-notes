@@ -1,16 +1,21 @@
 <!-- ============================================================
+     LICENSING NOTE — this file contains GPLv2 content.
+     The rule bodies below are copied from the Wazuh default ruleset
+     (wazuh/wazuh, ruleset/rules/), which is licensed GPLv2. Each body is
+     reproduced with a single routing option added. This file is therefore
+     distributed under the GPLv2, not the repository's MIT license.
+     See NOTICE.md.
+     ============================================================ -->
+<!-- ============================================================
      DEFAULT-RULE ROUTING OVERRIDES — Windows
      Created 2026-07-08 (alerting-discipline review).
 
      WHY THIS FILE EXISTS
-     We must not e-mail on a handful of noisy Wazuh DEFAULT rules, and we must
-     e-mail on two that ship below threshold. Editing the shipped default files
-     (/var/ossec/ruleset/rules/*) is the WRONG way: (1) the deploy script never
-     touches that directory, so the change never reaches the manager, and
-     (2) a Wazuh upgrade overwrites it. This is a CUSTOM file (etc/rules/), so it
-     deploys with deploy-rules-to-manager.sh like every other 10x file AND
-     survives upgrades. It supersedes the in-place edits in this repo's
-     Windows/rules/default/* copies (those are now documentation only).
+     A handful of noisy Wazuh DEFAULT rules should not e-mail, and two that ship
+     below threshold should. Editing the shipped default files
+     (/var/ossec/ruleset/rules/*) is the WRONG way to do that: a Wazuh upgrade
+     overwrites that directory. This is a CUSTOM file (/var/ossec/etc/rules/),
+     so it deploys like every other file here AND survives upgrades.
 
      HOW IT WORKS
      overwrite="yes" replaces the default rule of the same id. Custom rules in

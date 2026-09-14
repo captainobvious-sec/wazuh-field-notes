@@ -1,0 +1,11 @@
+<!-- Add to /var/ossec/etc/ossec.conf on the agent that runs the rsyslog relay
+     (see ingest/unifi/10-unifi.conf), then restart wazuh-agent.
+
+     The relay writes one clean, single-header line per event to this file; the
+     UniFi decoders in decoders/unifi/unifi.xml parse it from there. syslog
+     format (not JSON) is correct — UniFi emits CEF text, not JSON. -->
+
+<localfile>
+  <log_format>syslog</log_format>
+  <location>/var/log/unifi/unifi.log</location>
+</localfile>

@@ -1,4 +1,12 @@
 <!-- ============================================================
+     LICENSING NOTE — this file contains GPLv2 content.
+     The overwrite="yes" rule bodies in this file are derived from the Wazuh default ruleset
+     (wazuh/wazuh, ruleset/rules/), which is licensed GPLv2. Each body is
+     reproduced with a single routing option added. This file is therefore
+     distributed under the GPLv2, not the repository's MIT license.
+     See NOTICE.md.
+     ============================================================ -->
+<!-- ============================================================
      SECTION 1 - Silence default leaves replaced by custom rules
      overwrite="yes" REPLACES the default rule wholesale, so each block
      below restates the original's parent + eventID match and just sets
@@ -137,7 +145,7 @@
   </rule>
 
   <!-- 4719/4907/4912 audit policy events: all three are now covered by
-       custom rules 100351/100362/100363 in 104-ad_correlation_rules.xml.
+       custom rules 100351/100362/100363 in 104_ad_correlation.xml.
        60112 is silenced here so only the specific custom rules alert.
        NOTE: this overwrite also adds 4715 (the original default match had
        a duplicated 4719 and no 4715) — intentional and harmless. -->

@@ -20,11 +20,15 @@
      - Requires a real IPv4 ipAddress, so local/console failures (ipAddress "-")
        are skipped (they are not cross-host attacks).
 
-     ⚠ MUST VALIDATE BEFORE TRUSTING: child decoders on JSON eventchannel events
-     can behave differently across Wazuh 4.x builds. Run wazuh-logtest with a
-     real 4625 line and confirm the output shows decoder "windows_eventchannel"
-     AND a populated srcip. If srcip does NOT appear, this technique is not
-     supported on your build — just delete this file (no other impact).
+     ⚠ STATUS: DOES NOT LOAD ON WAZUH 4.14.x — DO NOT DEPLOY.
+     Tested on 4.14.3: the manager rejects this file at load time with
+         "Parent decoder name invalid: windows_eventchannel"
+     because windows_eventchannel is a PLUGIN decoder and plugin decoders take
+     no XML children. Copying this into /var/ossec/etc/decoders/ makes
+     `wazuh-analysisd -t` fail, which blocks a wazuh-manager restart.
+     The file is retained for reference only — the intent below is still
+     valid, but it needs a different mechanism on 4.14.x. See
+     experimental/README.md.
      ============================================================ -->
 
   <!-- Child A: failed logon WITH a remote IPv4 -> normalize both user + IP.

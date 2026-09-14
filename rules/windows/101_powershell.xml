@@ -299,7 +299,7 @@
        NOTE (2026-07-08): email demoted to digest here because the `vssadmin`
        alternation fires on every backup job (FP). The unambiguous half
        (ntds.dit / reg save sam|system) is split into Tier-1 child 100607 in
-       107-alert_tuning_windows.xml, which keeps emailing. -->
+       107_alert_tuning.xml, which keeps emailing. -->
   <rule id="100432" level="14">
     <if_sid>91802</if_sid>
     <field name="win.system.eventID">^4104$</field>
@@ -335,7 +335,7 @@
        NOTE (2026-07-08): email demoted (exclusion/preference management is
        routine endpoint admin). Hard-kill patterns (DisableRealtimeMonitoring
        / tamper-protection off) are split into Tier-1 child 100605 in
-       107-alert_tuning_windows.xml. -->
+       107_alert_tuning.xml. -->
   <rule id="100440" level="14">
     <if_sid>91802</if_sid>
     <field name="win.system.eventID">^4104$</field>
@@ -489,9 +489,9 @@
      IDs 100470-100499
 
      CONSOLIDATED 2026-07-08: these 4103 module-logging rules were merged INTO
-     this file (per operator preference for a single PowerShell rule file). The
-     former separate file 106-ps_module_logging_windows.xml has been emptied so
-     the IDs 100470-100485 are declared exactly once. 4104 script-block rules are
+     this file, so there is a single PowerShell rule file. They previously lived
+     in a separate "106" file (hence the gap in the 100-108 numbering); the IDs
+     100470-100485 are now declared exactly once, here. 4104 script-block rules are
      above (100400-100462); 4103 cmdlet/pipeline rules are below and carry the
      invoking user SID ($(win.system.securityUserID)).
 
@@ -600,7 +600,7 @@
     <field name="win.eventdata.payload" type="pcre2">(?i)(Set-MpPreference\s+.*-Disable|Add-MpPreference\s+.*-ExclusionPath|Set-MpPreference\s+.*-ExclusionProcess|amsiInitFailed|AmsiUtils|System\.Management\.Automation\.AmsiUtils|Disable-WindowsOptionalFeature.*Defender)</field>
     <!-- ROUTING 2026-07-08: demoted to digest; exclusion/preference management is
          routine endpoint admin. Hard-kill patterns are split into Tier-1 child
-         100606 in 107-alert_tuning_windows.xml. -->
+         100606 in 107_alert_tuning.xml. -->
     <options>no_full_log</options>
     <options>no_email_alert</options>
     <description>PS Module Evasion: Defender/AMSI tampering by SID $(win.system.securityUserID) on $(win.system.computer)</description>

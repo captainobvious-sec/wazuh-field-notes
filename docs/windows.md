@@ -16,11 +16,30 @@ stock Wazuh Windows rulesets (`0575`, `0580`, `0840`, `0915`) and the Windows ev
 | `107_alert_tuning.xml` | 100601–100610 | Tier-1 composites (RDP-success-after-brute, Defender hard-kill, NTDS dump, webshell) |
 | `108_default_overrides.xml` | stock IDs (`overwrite`) | Email-tiering of stock rules without editing the base ruleset |
 
+`103_`, `104_` and `108_` contain content derived from the GPLv2 Wazuh default ruleset —
+see `NOTICE.md`. There is no `106_`: those PowerShell module-logging rules were merged
+into `101_powershell.xml`, which is why the numbering skips it.
+
 ## Telemetry prerequisites (endpoints)
-- **Sysmon** installed with a good config (process creation, registry, image load).
+
+This ruleset is designed to work **without Sysmon** — it runs on the native Security
+eventlog, PowerShell operational logging and Wazuh registry FIM. Required:
+
 - **Windows Security** auditing: Logon/Logoff, Account/Group Management, Kerberos
   Auth & Service Ticket, Credential Validation, Detailed Tracking (4688 + command line).
 - **PowerShell** operational logging: Script Block Logging (4104) and Module Logging (4103).
+- **Registry FIM**: `<windows_registry>` entries under `<syscheck>` in the agent config,
+  for the hives `102_registry_integrity.xml` watches. Registry monitoring is scan-based,
+  so a value written and deleted between scans is never seen.
+- Agent `<localfile>` eventchannel blocks for `Security`, `System` and
+  `Microsoft-Windows-PowerShell/Operational`.
+
+**Optional — Sysmon.** Exactly one rule needs it: **100354** (renamed offensive tool by
+PE `originalFileName`) chains onto `61603`, Sysmon Event 1. Security event 4688 does not
+carry `OriginalFileName`, so without Sysmon — and without a `<localfile>` for
+`Microsoft-Windows-Sysmon/Operational` — that one rule is dormant. Rule **100340**
+(process name match on 4688) is the Sysmon-free fallback. Every other rule here works
+with no Sysmon at all.
 
 ## Gotchas
 

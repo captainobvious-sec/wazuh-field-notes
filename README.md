@@ -8,18 +8,17 @@ All detections use custom rule-ID ranges reserved to avoid collisions with the s
 
 ```
 rules/
-  windows/    100_ … 108_    Logon, PowerShell, registry, AD correlation, tuning, overrides
-  proxmox/                    Proxmox VE + PBS auth, VM/backup ops, storage
-  unifi/                      UniFi firewall, IDS/IPS, WiFi/RADIUS, admin
-  common/                    Cross-device correlation (multi-platform)
+  windows/   100_ … 108_   Logon, PowerShell, registry, AD correlation, tuning, overrides
+  proxmox/                 Proxmox VE + PBS auth, VM/backup ops, storage
+  unifi/                   UniFi firewall, IDS/IPS, WiFi/RADIUS, admin
 decoders/
-  windows/    windows_normalize.xml (optional field-normalization for cross-platform correlation)
-  proxmox/                    PVE/PBS field-extraction decoders
-  unifi/                      UniFi CEF + firewall + hostapd decoders
-  common/
-dashboards/
-  windows/  proxmox/  unifi/  OpenSearch Dashboards saved-object exports (.ndjson)
-docs/         windows.md  proxmox.md  unifi.md    Per-platform notes, gotchas, MITRE mapping
+  proxmox/                 PVE/PBS field-extraction decoders
+  unifi/                   UniFi CEF + firewall + hostapd decoders
+dashboards/                OpenSearch Dashboards saved-object exports (.ndjson)
+  windows/  proxmox/  unifi/        — see dashboards/README.md before importing
+ingest/                    Collection-side config (UniFi rsyslog relay + localfile)
+docs/                      Per-platform notes, gotchas, MITRE mapping
+experimental/              Known-incomplete work — NOT deployed, see its README
 ```
 
 ## Rule-ID range map
@@ -36,24 +35,33 @@ docs/         windows.md  proxmox.md  unifi.md    Per-platform notes, gotchas, M
 | 60xxx/91xxx/92xxx (overwrite) | Stock-rule routing overrides (`108_default_overrides.xml`) |
 | 100700–100765 | UniFi (`unifi.xml`) |
 | 100800–100867 | Proxmox VE + PBS (`proxmox.xml`) |
-| 129000–129013 | Cross-device correlation (`cross_device_correlation.xml`) |
+| 129000–129013 | Cross-device correlation (`experimental/cross_device_correlation.xml`) |
 
 ## Deployment
 
+Run on the manager:
+
 ```bash
-# rules
-sudo cp rules/windows/*.xml rules/proxmox/*.xml rules/unifi/*.xml rules/common/*.xml \
-        /var/ossec/etc/rules/
-# decoders
-sudo cp decoders/proxmox/*.xml decoders/unifi/*.xml /var/ossec/etc/decoders/
-sudo chown wazuh:wazuh /var/ossec/etc/rules/*.xml /var/ossec/etc/decoders/*.xml
-sudo chmod 660        /var/ossec/etc/rules/*.xml /var/ossec/etc/decoders/*.xml
+# rules + decoders
+sudo install -o wazuh -g wazuh -m 660 \
+     rules/windows/*.xml rules/proxmox/*.xml rules/unifi/*.xml /var/ossec/etc/rules/
+sudo install -o wazuh -g wazuh -m 660 \
+     decoders/proxmox/*.xml decoders/unifi/*.xml /var/ossec/etc/decoders/
 
 sudo /var/ossec/bin/wazuh-analysisd -t          # must exit 0
 sudo systemctl restart wazuh-manager
 ```
 
-Dashboards are imported through the web UI: **Dashboards → Stack Management → Saved Objects → Import**. Keep the `wazuh-alerts-*` index pattern; the UniFi/Proxmox exports bundle their own `wazuh-alerts-4.x-*` pattern.
+Nothing in `experimental/` is deployed by those commands — that is deliberate. Read
+`experimental/README.md` before touching it; both files there have known limitations on
+4.14.x and one of them will make `wazuh-analysisd -t` fail.
+
+For UniFi you also need the collection side — a syslog relay and a `<localfile>` entry
+on the agent. See `ingest/README.md`.
+
+Dashboards are imported through the web UI. **The Windows exports ship with
+index-pattern-id placeholders that you must substitute first** — see
+`dashboards/README.md`.
 
 ### Load order matters
 
@@ -65,9 +73,15 @@ Do not rename the Windows files in a way that changes their alphabetical order.
 
 ## Requirements / notes
 
-- **Windows** rules require Sysmon + Windows Security + PowerShell operational logging on the endpoints (see `docs/windows.md`).
+- **Windows** rules need the Windows Security eventlog + PowerShell operational logging on the endpoints. **Sysmon is not required** — exactly one rule (100354) uses it. See `docs/windows.md`.
 - **DCSync (rule 100332)** needs "Audit Directory Service Access" and a replication-rights SACL on the domain object — see `docs/windows.md`.
 - **Proxmox** rules chain onto the stock `0495-proxmox-ve_rules.xml` (rule 87200) — see `docs/proxmox.md`.
-- **UniFi** logs are expected via a syslog relay forwarding CEF to a Wazuh agent — see `docs/unifi.md`.
+- **UniFi** logs arrive via a syslog relay forwarding CEF to a Wazuh agent — config in `ingest/unifi/`, background in `docs/unifi.md`.
+
+## Licensing
+
+MIT (see `LICENSE`), **except** three Windows rule files that contain content derived
+from the GPLv2 Wazuh default ruleset and are distributed under the GPLv2. See
+`NOTICE.md` for the exact scope.
 
 See `CHANGELOG.md` for version history.

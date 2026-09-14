@@ -1,3 +1,11 @@
+<!-- ============================================================
+     LICENSING NOTE — this file contains GPLv2 content.
+     The overwrite="yes" rule bodies in this file are derived from the Wazuh default ruleset
+     (wazuh/wazuh, ruleset/rules/), which is licensed GPLv2. Each body is
+     reproduced with a single routing option added. This file is therefore
+     distributed under the GPLv2, not the repository's MIT license.
+     See NOTICE.md.
+     ============================================================ -->
 <!--
   ad_correlation_rules.xml
 
@@ -403,7 +411,7 @@
     <group>policy_changed,gpo_changed,</group>
   </rule>
 
-  <!-- Audit Policy Changed — 60112 (103-local_rules.xml) is overwritten to
+  <!-- Audit Policy Changed — 60112 (103_local_rules.xml) is overwritten to
        level=0 so only these specific custom rules generate alerts.
        4907/4912 coverage added here so 60112 can be safely silenced. -->
   <rule id="100351" level="12">
@@ -574,7 +582,7 @@
 
   <!-- 5136 — AdminSDHolder object modification.
        AdminSDHolder tampering grants persistent privileged access via SDProp.
-       Parent 60229 is the level=0 overwrite in 103-local_rules.xml; level=0
+       Parent 60229 is the level=0 overwrite in 103_local_rules.xml; level=0
        parents still route events to children. -->
   <rule id="100359" level="15">
     <if_sid>60229</if_sid>
