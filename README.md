@@ -1,5 +1,7 @@
 # Wazuh Custom Rules, Decoders & Dashboards
 
+[![validate](https://github.com/captainobvious-sec/wazuh-field-notes/actions/workflows/validate.yml/badge.svg)](https://github.com/captainobvious-sec/wazuh-field-notes/actions/workflows/validate.yml)
+
 Custom Wazuh detection content for **Windows / Active Directory**, **Linux (Rocky / RHEL-family)**, **Proxmox VE + PBS**, and **UniFi** networks, plus OpenSearch Dashboards visualizations. Tested on **Wazuh 4.14.x**.
 
 All detections use custom rule-ID ranges reserved to avoid collisions with the stock Wazuh ruleset.
@@ -95,6 +97,24 @@ Do not rename the Windows files in a way that changes their alphabetical order.
 - **DCSync (rule 100332)** needs "Audit Directory Service Access" and a replication-rights SACL on the domain object — see `docs/windows.md`.
 - **Proxmox** rules chain onto the stock `0495-proxmox-ve_rules.xml` (rule 87200) — see `docs/proxmox.md`.
 - **UniFi** logs arrive via a syslog relay forwarding CEF to a Wazuh agent — config in `ingest/unifi/`, background in `docs/unifi.md`.
+
+## Validation
+
+Every push runs two checks, so you do not have to take the ruleset on trust:
+
+- **structural lint** — XML well-formedness, duplicate rule ids, custom `if_sid`
+  chains that resolve, `level` bounds, `frequency` below the manager's minimum of 2,
+  `<same_field>` used on a static field, pcre2 that will not compile, `decoded_as`
+  with no matching decoder, dashboard JSON and panel references.
+- **`wazuh-analysisd -t`** — the deployed set loaded into a real Wazuh manager
+  container. Pinned to **4.14.3** (must pass) and run against **latest** as an
+  advisory signal, because this ruleset chains onto stock rule ids and an upstream
+  release is the most likely way for it to break.
+
+A weekly scheduled run catches a new Wazuh release breaking things with no commits.
+
+Correlation rules are **not** covered: `if_matched_*` composites do not accumulate
+inside `wazuh-logtest`, so every `frequency`-based rule still needs a live soak.
 
 ## Licensing
 

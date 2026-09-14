@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **CI (`.github/workflows/validate.yml`)** — every push, PR and a weekly schedule run
+  two layers: a structural lint that needs no Wazuh install, and `wazuh-analysisd -t`
+  against a real manager container, pinned to 4.14.3 (must pass) plus `latest` as an
+  advisory signal. The ruleset chains onto stock rule ids and reproduces eleven stock
+  rule bodies, so an upstream release is the likeliest way for it to break — silently,
+  by no longer firing. The scheduled run catches that with no commits involved.
+- CI also asserts that `experimental/windows_normalize.xml` is **still rejected** by
+  the manager, so the documented dead end cannot quietly become loadable and leave
+  `experimental/README.md` wrong.
+- Correlation rules are explicitly out of scope for CI: `if_matched_*` composites do
+  not accumulate inside `wazuh-logtest`, so `frequency`-based rules still need a live
+  soak. Stated in the README rather than left as an implied gap.
+
 ## v1.2.0 — Linux (Rocky / RHEL-family)
 
 ### Added

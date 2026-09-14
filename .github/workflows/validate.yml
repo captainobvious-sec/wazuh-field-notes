@@ -1,0 +1,76 @@
+name: validate
+
+# Two layers, matching the two things that can go wrong with a Wazuh ruleset:
+#   lint      — structural mistakes that are silent at load time (seconds, no Wazuh)
+#   analysisd — the authoritative "does the manager accept this" check (a container)
+#
+# The analysisd job runs against a pinned version that must pass, and against the
+# newest release as an advisory signal. This ruleset chains onto stock rule ids
+# (87200 Proxmox, 60103/60106/91802 Windows, 80700/80792 Linux) and reproduces
+# eleven stock rule bodies under overwrite="yes", so an upstream release is the
+# most likely way for it to break — silently, by no longer firing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Catches a new Wazuh release breaking the ruleset even with no commits.
+    - cron: "0 6 * * 1"
+
+jobs:
+  lint:
+    name: structural lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xmllint
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils
+      - name: Run lint
+        run: python3 .github/scripts/lint_ruleset.py
+
+  analysisd:
+    name: analysisd -t (${{ matrix.wazuh }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.advisory }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - wazuh: "4.14.3"   # the version this set is validated on
+            advisory: false
+          - wazuh: "latest"   # early warning for the next release
+            advisory: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load the deployed ruleset and validate
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" \
+            wazuh/wazuh-manager:${{ matrix.wazuh }} bash -c '
+              set -euo pipefail
+              install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml    /var/ossec/etc/rules/
+              install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml /var/ossec/etc/decoders/
+              /var/ossec/bin/wazuh-analysisd -t
+            '
+
+      - name: Confirm experimental/ is still rejected
+        # experimental/windows_normalize.xml attaches child decoders to the
+        # windows_eventchannel plugin decoder, which 4.14.x refuses. It ships as a
+        # documented dead end, so CI asserts it stays dead rather than quietly
+        # becoming loadable and misleading the README.
+        continue-on-error: true
+        run: |
+          if docker run --rm -v "$PWD:/repo:ro" \
+               wazuh/wazuh-manager:${{ matrix.wazuh }} bash -c '
+                 install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml /var/ossec/etc/rules/
+                 install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml /var/ossec/etc/decoders/
+                 install -o wazuh -g wazuh -m 660 /repo/experimental/windows_normalize.xml \
+                         /var/ossec/etc/decoders/
+                 /var/ossec/bin/wazuh-analysisd -t
+               ' 2>/dev/null; then
+            echo "::warning::windows_normalize.xml now LOADS on ${{ matrix.wazuh }} — experimental/README.md is out of date"
+          else
+            echo "still rejected on ${{ matrix.wazuh }}, as documented"
+          fi
