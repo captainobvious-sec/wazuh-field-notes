@@ -28,6 +28,15 @@
   agent `<localfile>` snippet. `docs/unifi.md` described this step but shipped no config.
 - `dashboards/README.md` — import procedure, field-schema check, timezone note.
 - `.gitattributes` — normalizes line endings (one rule file had shipped as CRLF).
+- `LICENSE.GPL-2.0` — the GPLv2 text itself. The licence requires it to accompany the
+  code, and the three GPLv2 files were shipped without it.
+
+### Note on `LICENSE`
+An explanatory preamble had been prepended to the MIT text. That dropped the file below
+GitHub's license-matching threshold, so the repository was detected as "Other /
+NOASSERTION" instead of MIT. `LICENSE` is now the unmodified MIT text again; the
+GPLv2 carve-out lives in `NOTICE.md`, `README.md` and the headers of the three affected
+rule files, which is where it belongs.
 
 ## v1.0.0 — Initial public release
 

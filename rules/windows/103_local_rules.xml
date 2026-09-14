@@ -3,8 +3,8 @@
      The overwrite="yes" rule bodies in this file are derived from the Wazuh default ruleset
      (wazuh/wazuh, ruleset/rules/), which is licensed GPLv2. Each body is
      reproduced with a single routing option added. This file is therefore
-     distributed under the GPLv2, not the repository's MIT license.
-     See NOTICE.md.
+     distributed under the GPLv2 (full text in LICENSE.GPL-2.0), not the
+     repository's MIT license. See NOTICE.md.
      ============================================================ -->
 <!-- ============================================================
      SECTION 1 - Silence default leaves replaced by custom rules

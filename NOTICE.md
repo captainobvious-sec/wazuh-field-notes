@@ -1,13 +1,16 @@
 # Third-party content and licensing
 
+`LICENSE` holds the MIT text and is what GitHub's license detector reports for the
+repository as a whole. It does not override the per-file GPLv2 headers below.
+
 The bulk of this repository — the `100xxx`, `110xxx` and `129xxx` custom rules, the
 Proxmox and UniFi decoders, the dashboards and the documentation — is original work,
 licensed under the MIT License in `LICENSE`.
 
 Three files additionally contain content derived from the **Wazuh default ruleset**
 ([wazuh/wazuh](https://github.com/wazuh/wazuh), `ruleset/rules/`), which is licensed
-under the **GNU General Public License v2**. Those files are distributed under the
-GPLv2, not MIT.
+under the **GNU General Public License v2** — the full text of which is in
+`LICENSE.GPL-2.0`. Those three files are distributed under the GPLv2, not MIT.
 
 | File | Stock rule IDs | Nature of the derivation |
 |---|---|---|

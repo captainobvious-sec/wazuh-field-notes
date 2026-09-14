@@ -80,8 +80,10 @@ Do not rename the Windows files in a way that changes their alphabetical order.
 
 ## Licensing
 
-MIT (see `LICENSE`), **except** three Windows rule files that contain content derived
-from the GPLv2 Wazuh default ruleset and are distributed under the GPLv2. See
-`NOTICE.md` for the exact scope.
+MIT (`LICENSE`), **except** three Windows rule files — `103_local_rules.xml`,
+`104_ad_correlation.xml` and `108_default_overrides.xml` — which reproduce rule bodies
+from the GPLv2 Wazuh default ruleset and are therefore distributed under the GPLv2
+(`LICENSE.GPL-2.0`). `NOTICE.md` lists the exact rule ids and the nature of each
+derivation.
 
 See `CHANGELOG.md` for version history.
