@@ -47,22 +47,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Stage a flat ruleset
+        # Wazuh does not recurse into subdirectories of etc/rules, so flatten
+        # rules/<platform>/*.xml into one directory before loading.
+        run: |
+          mkdir -p stage/rules stage/decoders
+          cp rules/*/*.xml       stage/rules/
+          cp decoders/*/*.xml    stage/decoders/
+          echo "staged $(ls stage/rules | wc -l) rule files, $(ls stage/decoders | wc -l) decoders"
+
       - name: Load the deployed ruleset and validate
         run: |
-          docker run --rm --entrypoint bash -v "$PWD:/repo:ro" \
-            wazuh/wazuh-manager:${{ matrix.wazuh }} -c '
-              set -uo pipefail
-              # analysisd resolves etc/internal_options.conf relative to its own
-              # home, so it must be run from /var/ossec, not from /.
-              cd /var/ossec
-              echo "--- cwd: $(pwd)"
-              ls -1 etc/internal_options.conf 2>&1 || { echo "--- etc/:"; ls -1 etc/ | head -20; }
-              mkdir -p etc/rules etc/decoders
-              install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml    etc/rules/
-              install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml etc/decoders/
-              echo "--- loaded: $(ls -1 etc/rules/*.xml | wc -l) rule files, $(ls -1 etc/decoders/*.xml | wc -l) decoder files"
-              ./bin/wazuh-analysisd -t
-            '
+          set -euo pipefail
+          IMG=wazuh/wazuh-manager:${{ matrix.wazuh }}
+
+          # /var/ossec/etc is empty in the image; the entrypoint populates it at
+          # startup. So boot the container normally and validate inside it rather
+          # than overriding the entrypoint.
+          cid=$(docker run -d "$IMG")
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+
+          echo "waiting for the manager to populate /var/ossec/etc ..."
+          for i in $(seq 1 90); do
+            if docker exec "$cid" test -f /var/ossec/etc/internal_options.conf 2>/dev/null; then
+              echo "ready after ${i}s"; break
+            fi
+            sleep 1
+          done
+
+          if ! docker exec "$cid" test -f /var/ossec/etc/internal_options.conf; then
+            echo "::error::/var/ossec/etc never populated — image layout may have changed"
+            docker exec "$cid" find / -name internal_options.conf 2>/dev/null | head || true
+            docker logs "$cid" 2>&1 | tail -30
+            exit 1
+          fi
+
+          docker cp stage/rules/.    "$cid:/var/ossec/etc/rules/"
+          docker cp stage/decoders/. "$cid:/var/ossec/etc/decoders/"
+          docker exec "$cid" chown -R wazuh:wazuh /var/ossec/etc/rules /var/ossec/etc/decoders
+          docker exec "$cid" chmod 660 -R /var/ossec/etc/rules /var/ossec/etc/decoders
+
+          echo "--- validating"
+          docker exec -w /var/ossec "$cid" /var/ossec/bin/wazuh-analysisd -t
 
       - name: Confirm experimental/ is still rejected
         # experimental/windows_normalize.xml attaches child decoders to the
@@ -71,15 +97,19 @@ jobs:
         # becoming loadable and misleading the README.
         continue-on-error: true
         run: |
-          if docker run --rm --entrypoint bash -v "$PWD:/repo:ro" \
-               wazuh/wazuh-manager:${{ matrix.wazuh }} -c '
-                 cd /var/ossec
-                 mkdir -p etc/rules etc/decoders
-                 install -o wazuh -g wazuh -m 660 /repo/rules/*/*.xml etc/rules/
-                 install -o wazuh -g wazuh -m 660 /repo/decoders/*/*.xml etc/decoders/
-                 install -o wazuh -g wazuh -m 660 /repo/experimental/windows_normalize.xml etc/decoders/
-                 ./bin/wazuh-analysisd -t
-               ' >/dev/null 2>&1; then
+          set -uo pipefail
+          IMG=wazuh/wazuh-manager:${{ matrix.wazuh }}
+          cid=$(docker run -d "$IMG")
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 90); do
+            docker exec "$cid" test -f /var/ossec/etc/internal_options.conf 2>/dev/null && break
+            sleep 1
+          done
+          docker cp stage/rules/.    "$cid:/var/ossec/etc/rules/"
+          docker cp stage/decoders/. "$cid:/var/ossec/etc/decoders/"
+          docker cp experimental/windows_normalize.xml "$cid:/var/ossec/etc/decoders/"
+          docker exec "$cid" chown -R wazuh:wazuh /var/ossec/etc/rules /var/ossec/etc/decoders
+          if docker exec -w /var/ossec "$cid" /var/ossec/bin/wazuh-analysisd -t >/dev/null 2>&1; then
             echo "::warning::windows_normalize.xml now LOADS on ${{ matrix.wazuh }} — experimental/README.md is out of date"
           else
             echo "still rejected on ${{ matrix.wazuh }}, as documented"
