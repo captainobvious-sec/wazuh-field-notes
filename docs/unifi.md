@@ -4,6 +4,8 @@ Detection for UniFi networks (UniFi OS / Network). UniFi devices can't run a Waz
 agent, so logs are forwarded via a syslog relay to a host that does. UniFi emits **CEF**
 (not netfilter-style kernel logs), plus firewall syslog and hostapd for WiFi.
 
+Diagrams of every rule chain: [`docs/diagrams/unifi.md`](diagrams/unifi.md).
+
 ## Files
 
 | File | IDs | Purpose |

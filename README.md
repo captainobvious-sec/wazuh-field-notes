@@ -24,6 +24,7 @@ ingest/                    Collection-side config
   linux/                   agent.conf, auditd rules, syscheck scope
   unifi/                   rsyslog relay + localfile
 docs/                      Per-platform notes, gotchas, MITRE mapping
+  diagrams/                Rule-chain diagrams (Mermaid) — generated, see its README
 experimental/              Known-incomplete work — NOT deployed, see its README
 ```
 
@@ -72,6 +73,10 @@ Rules alone are not enough for two platforms. **UniFi** needs a syslog relay and
 `<localfile>` entry; **Linux** needs auditd rules and a FIM scope, without which 32 of its
 40 rules stay silent. Both are in `ingest/README.md`.
 
+**Diagrams.** [`docs/diagrams/`](docs/diagrams/README.md) draws every rule and what it
+chains onto — stock parents, correlation windows, cross-file load-order dependencies —
+plus how each platform's events reach the rules. GitHub renders them inline.
+
 Dashboards are imported through the web UI. **The Windows exports ship with
 index-pattern-id placeholders that you must substitute first** — see
 `dashboards/README.md`.
@@ -105,7 +110,8 @@ Every push runs two checks, so you do not have to take the ruleset on trust:
 - **structural lint** — XML well-formedness, duplicate rule ids, custom `if_sid`
   chains that resolve, `level` bounds, `frequency` below the manager's minimum of 2,
   `<same_field>` used on a static field, pcre2 that will not compile, `decoded_as`
-  with no matching decoder, dashboard JSON and panel references.
+  with no matching decoder, dashboard JSON and panel references — and that the
+  generated diagrams in `docs/diagrams/` still match the rule files.
 - **`wazuh-analysisd -t`** — the deployed set loaded into a real Wazuh manager
   container. Pinned to **4.14.3** (must pass) and run against **latest** as an
   advisory signal, because this ruleset chains onto stock rule ids and an upstream

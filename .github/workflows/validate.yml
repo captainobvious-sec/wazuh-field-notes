@@ -29,6 +29,10 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils
       - name: Run lint
         run: python3 .github/scripts/lint_ruleset.py
+      - name: Rule diagrams match the rule files
+        # docs/diagrams/<platform>.md is generated from the XML; a rule change that
+        # does not regenerate them would leave the pictures silently wrong.
+        run: python3 .github/scripts/rule_diagrams.py --check
 
   analysisd:
     name: analysisd -t (${{ matrix.wazuh }})

@@ -3,6 +3,8 @@
 Detection for Proxmox Virtual Environment and Proxmox Backup Server. Agents run
 directly on the PVE nodes and the PBS host; logs are read from syslog.
 
+Diagrams of every rule chain: [`docs/diagrams/proxmox.md`](diagrams/proxmox.md).
+
 ## Files
 
 | File | IDs | Purpose |

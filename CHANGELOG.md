@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **Rule diagrams (`docs/diagrams/`)** — one Mermaid page per platform, generated from
+  the rule XML by `.github/scripts/rule_diagrams.py`: a file map (which stock rulesets
+  feed each file, and the cross-file chains that fix the load order) and a chain
+  diagram per rule file showing every rule's parent, level, email routing and
+  correlation window. Stock parents are labelled from the 4.14.3 ruleset. A
+  hand-written index adds the legend and each platform's collection path. The lint
+  job runs the generator with `--check`, so a rule change that does not regenerate
+  the diagrams fails CI instead of leaving them silently wrong.
 - **CI (`.github/workflows/validate.yml`)** — every push, PR and a weekly schedule run
   two layers: a structural lint that needs no Wazuh install, and `wazuh-analysisd -t`
   against a real manager container, pinned to 4.14.3 (must pass) plus `latest` as an
