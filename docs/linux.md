@@ -8,6 +8,8 @@ will not fire as written.
 
 Everything chains onto the **stock** Wazuh rulesets — there are no custom Linux decoders.
 
+Diagrams of every rule chain: [`docs/diagrams/linux.md`](diagrams/linux.md).
+
 ## Two tiers
 
 The set splits cleanly by what telemetry it needs. This matters: deploy the whole thing

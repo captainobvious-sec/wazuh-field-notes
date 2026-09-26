@@ -3,6 +3,8 @@
 Custom detection for Windows endpoints and domain controllers. Rules chain onto the
 stock Wazuh Windows rulesets (`0575`, `0580`, `0840`, `0915`) and the Windows event-channel decoder.
 
+Diagrams of every rule chain: [`docs/diagrams/windows.md`](diagrams/windows.md).
+
 ## Files (load order)
 
 | File | IDs | Purpose |
