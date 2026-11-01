@@ -100,10 +100,8 @@ jobs:
           docker exec -w /var/ossec "$cid" /var/ossec/bin/wazuh-analysisd -t 2>&1 | tee analysisd.log
           # analysisd -t exits 0 even when it cannot open a file or ignores a rule
           # (warnings 1103/7615/7617/7619), so any WARNING/ERROR/CRITICAL line fails the job.
-          # Expected in the container: it cannot raise its file-descriptor limit, and it has
-          # no site CDB list for rule 100100 (README: Requirements).
-          if grep -E 'WARNING|ERROR|CRITICAL' analysisd.log | grep -v -e 'Could not set resource limit' \
-               -e "List 'etc/lists/blacklist-alienvault' could not be loaded"; then
+          # The container cannot raise its file-descriptor limit; that one line is expected.
+          if grep -E 'WARNING|ERROR|CRITICAL' analysisd.log | grep -v 'Could not set resource limit'; then
             echo "::error::wazuh-analysisd reported problems (see above)"
             exit 1
           fi

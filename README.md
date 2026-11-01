@@ -49,7 +49,7 @@ experimental/              Known-incomplete work — NOT deployed, see its READM
 | 111400–111470 | Linux defense evasion (`114_defense_evasion.xml`) |
 | 100800–100871 | Proxmox VE + PBS (`proxmox.xml`) |
 | 100950–100972 | Homelab tuning (`109_homelab_tuning.xml`) |
-| 100010–100100, 100900–100903 | Homelab local rules, Cloudflare Access (`local_rules.xml`) |
+| 100010–100020, 100900–100903 | Homelab local rules, Cloudflare Access (`local_rules.xml`) |
 | 129000–129013 | Cross-device correlation (`experimental/cross_device_correlation.xml`) |
 
 ## Deployment
@@ -101,7 +101,7 @@ Do not rename the Windows files in a way that changes their alphabetical order.
 - **DCSync (rule 100332)** needs "Audit Directory Service Access" and a replication-rights SACL on the domain object — see `docs/windows.md`.
 - **Proxmox** rules chain onto the stock `0495-proxmox-ve_rules.xml` (rule 87200) — see `docs/proxmox.md`.
 - **UniFi** logs arrive via a syslog relay forwarding CEF to a Wazuh agent — config in `ingest/unifi/`, background in `docs/unifi.md`.
-- **Homelab** `local_rules.xml`: rule 100100 needs the CDB list `etc/lists/blacklist-alienvault` declared in `ossec.conf`, and rules 100900–100903 need the Cloudflare Access JSON events from a poller script.
+- **Homelab** `local_rules.xml`: rules 100900–100903 need the Cloudflare Access JSON events from a poller script.
 
 ## Validation
 

@@ -12,15 +12,6 @@
   </rule>
 </group>
 
-
-<group name="attack,">
-  <rule id="100100" level="10">
-    <if_group>web|attack|attacks</if_group>
-    <list field="srcip" lookup="address_match_key">etc/lists/blacklist-alienvault</list>
-    <description>IP address found in AlienVault reputation database.</description>
-  </rule>
-</group>
-
 <group name="windows, detection,">
   <rule id="100010" level="7">
     <if_sid>60107</if_sid> <!-- This checks for Windows Process Creation -->
