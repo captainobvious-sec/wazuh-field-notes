@@ -191,8 +191,9 @@
   </rule>
 
   <!-- Multiple RDP failures for the same user within 5 minutes = possible
-       brute-force in progress. Fires on the 2nd RDP failure (100211) for
-       the same targetUserName — NOT a success-after-failure rule. -->
+       brute-force in progress. Fires on the 3rd RDP failure (100211) for
+       the same targetUserName (frequency=N fires on the Nth matching event,
+       live-validated 2026-07-04) — NOT a success-after-failure rule. -->
   <rule id="100222" level="7" frequency="3" timeframe="300">
     <if_matched_sid>100211</if_matched_sid>
     <same_field>win.eventdata.targetUserName</same_field>
@@ -202,6 +203,23 @@
       <id>T1110.001</id>
     </mitre>
     <group>authentication_failed,brute_force,attack,</group>
+  </rule>
+
+  <!-- FIX 2026-09-24 (REVIEW.md F-28): unknown-username failures (100213, L6)
+       outrank 100211 (L5) under 60122, so a brute force that cycles NON-EXISTENT
+       usernames from a remote host never fed 100215/100604. This burst covers it.
+       The <field> keeps local/console failures (ipAddress "-") out of the count. -->
+  <rule id="100227" level="10" frequency="10" timeframe="120">
+    <if_matched_sid>100213</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <field name="win.eventdata.ipAddress" type="pcre2">^(?!-$)(?!127\.)(?!::1$)(?!0\.0\.0\.0$).+$</field>
+    <options>no_full_log</options>
+    <description>AD: Username-guessing brute force - 10+ logon failures for NON-EXISTENT accounts from $(win.eventdata.ipAddress)</description>
+    <mitre>
+      <id>T1110.001</id>
+      <id>T1087.002</id>
+    </mitre>
+    <group>authentication_failed,brute_force,account_enumeration,attack,</group>
   </rule>
 
   <!-- ===================== logoff ===================== -->

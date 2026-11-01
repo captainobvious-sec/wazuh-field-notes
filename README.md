@@ -11,15 +11,17 @@ All detections use custom rule-ID ranges reserved to avoid collisions with the s
 ```
 rules/
   windows/   100_ … 108_   Logon, PowerShell, registry, AD correlation, tuning, overrides
-  linux/     110_ … 115_   Auth correlation, privesc, persistence, lateral movement, evasion
+  linux/     110_ … 114_   Auth correlation, privesc, persistence, lateral movement, evasion
   proxmox/                 Proxmox VE + PBS auth, VM/backup ops, storage
   unifi/                   UniFi firewall, IDS/IPS, WiFi/RADIUS, admin
+  homelab/                 Homelab tuning (rootcheck/FIM/sudo noise, disk errors, log freshness),
+                           Cloudflare Access and local rules
 decoders/
   proxmox/                 PVE/PBS field-extraction decoders
   unifi/                   UniFi CEF + firewall + hostapd decoders
                            (Windows and Linux use the stock decoders — none needed)
 dashboards/                OpenSearch Dashboards saved-object exports (.ndjson)
-  windows/  linux/  proxmox/  unifi/   — see dashboards/README.md before importing
+  windows/  linux/  homelab/   — see dashboards/README.md before importing
 ingest/                    Collection-side config
   linux/                   agent.conf, auditd rules, syscheck scope
   unifi/                   rsyslog relay + localfile
@@ -31,21 +33,23 @@ experimental/              Known-incomplete work — NOT deployed, see its READM
 
 | Range | Platform / file |
 |---|---|
-| 100200–100222 | Windows logon events (`100_logon_events.xml`) |
-| 100300–100364 | Windows AD correlation (`104_ad_correlation.xml`) |
-| 100218, 100333–100358 | Windows additional AD / Kerberos (`105_additional_ad_detections.xml`) |
+| 100200–100227 | Windows logon events (`100_logon_events.xml`) |
+| 100300–100367 | Windows AD correlation (`104_ad_correlation.xml`) |
+| 100218–100219, 100333–100358 | Windows additional AD / Kerberos (`105_additional_ad_detections.xml`) |
 | 100400–100485 | Windows PowerShell (`101_powershell.xml`) |
 | 100500–100557 | Windows registry integrity (`102_registry_integrity.xml`) |
-| 100601–100610 | Windows alert tuning (`107_alert_tuning.xml`) |
-| 110002/110003/100360 | Kerberoasting / Golden / Silver ticket (`103_local_rules.xml`) |
-| 60xxx/91xxx/92xxx (overwrite) | Stock-rule routing overrides (`108_default_overrides.xml`) |
-| 100700–100765 | UniFi (`unifi.xml`) |
+| 100604–100610 | Windows alert tuning (`107_alert_tuning.xml`) |
+| 110002/110003/110009/100360 | Kerberoasting / Golden / Silver ticket (`103_local_rules.xml`) |
+| 204, 60xxx/91xxx/92xxx (overwrite) | Stock-rule routing overrides (`108_default_overrides.xml`) |
+| 100700–100791 | UniFi (`unifi.xml`) |
 | 111000–111030 | Linux auth correlation (`110_auth_correlation.xml`) |
 | 111100–111151 | Linux privilege escalation (`111_privilege_escalation.xml`) |
 | 111200–111250 | Linux persistence (`112_persistence.xml`) |
 | 111300–111331 | Linux lateral movement / credential access (`113_lateral_movement.xml`) |
 | 111400–111470 | Linux defense evasion (`114_defense_evasion.xml`) |
-| 100800–100867 | Proxmox VE + PBS (`proxmox.xml`) |
+| 100800–100871 | Proxmox VE + PBS (`proxmox.xml`) |
+| 100950–100972 | Homelab tuning (`109_homelab_tuning.xml`) |
+| 100010–100100, 100900–100903 | Homelab local rules, Cloudflare Access (`local_rules.xml`) |
 | 129000–129013 | Cross-device correlation (`experimental/cross_device_correlation.xml`) |
 
 ## Deployment
@@ -55,7 +59,7 @@ Run on the manager:
 ```bash
 # rules + decoders
 sudo install -o wazuh -g wazuh -m 660 \
-     rules/windows/*.xml rules/linux/*.xml rules/proxmox/*.xml rules/unifi/*.xml \
+     rules/windows/*.xml rules/linux/*.xml rules/proxmox/*.xml rules/unifi/*.xml rules/homelab/*.xml \
      /var/ossec/etc/rules/
 sudo install -o wazuh -g wazuh -m 660 \
      decoders/proxmox/*.xml decoders/unifi/*.xml /var/ossec/etc/decoders/
@@ -81,7 +85,7 @@ index-pattern-id placeholders that you must substitute first** — see
 Wazuh loads rule files alphabetically, across every file in `/var/ossec/etc/rules/`. The
 numeric prefixes encode required dependency orders.
 
-**Linux** (`110_` … `115_`): `111_privilege_escalation.xml` excludes the attack-tool
+**Linux** (`110_` … `114_`): `111_privilege_escalation.xml` excludes the attack-tool
 basenames so a dropped `ncat` falls through to rule 111250 in `112_persistence.xml`.
 
 **Windows** (`100_` … `108_`):
@@ -97,6 +101,7 @@ Do not rename the Windows files in a way that changes their alphabetical order.
 - **DCSync (rule 100332)** needs "Audit Directory Service Access" and a replication-rights SACL on the domain object — see `docs/windows.md`.
 - **Proxmox** rules chain onto the stock `0495-proxmox-ve_rules.xml` (rule 87200) — see `docs/proxmox.md`.
 - **UniFi** logs arrive via a syslog relay forwarding CEF to a Wazuh agent — config in `ingest/unifi/`, background in `docs/unifi.md`.
+- **Homelab** `local_rules.xml`: rule 100100 needs the CDB list `etc/lists/blacklist-alienvault` declared in `ossec.conf`, and rules 100900–100903 need the Cloudflare Access JSON events from a poller script.
 
 ## Validation
 

@@ -14,7 +14,7 @@ under the **GNU General Public License v2** — the full text of which is in
 
 | File | Stock rule IDs | Nature of the derivation |
 |---|---|---|
-| `rules/windows/108_default_overrides.xml` | 60015, 60162, 60171, 60187, 60188, 60189, 91803, 91822, 91823, 92650, 92655 | **Verbatim copies** of the shipped rule bodies (description, `<group>` compliance strings, `<if_sid>`, `<field>`, `<mitre>`) with a single routing option added |
+| `rules/windows/108_default_overrides.xml` | 204, 60015, 60162, 60168, 60171, 60173, 60174, 60187, 60188, 60189, 91803, 91822, 91823, 92650, 92655 | **Verbatim copies** of the shipped rule bodies (description, `<group>` compliance strings, `<if_sid>`, `<field>`, `<mitre>`) with a single routing option added; 60168, 60173 and 60174 are also raised to level 12 |
 | `rules/windows/103_local_rules.xml` | 60106, 60109, 60111, 60112, 60115, 60117, 60122, 60137, 60141, 60142, 60144, 60145, 60151, 60152, 60229, 92651 | Match conditions (`<if_sid>`, `<field>`) retained from the stock rules; descriptions and levels rewritten |
 | `rules/windows/104_ad_correlation.xml` | 60154, 60159, 60166, 60167 | Match conditions retained from the stock rules; descriptions, groups and MITRE tags rewritten |
 

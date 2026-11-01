@@ -2,11 +2,29 @@
 
 ## Unreleased
 
+### Changed
+- **Windows and Linux rules synced with the current production set** (sanitised): the
+  FIM rules in `102_registry_integrity.xml` use the `file` field (`syscheck.path` never
+  matches as a rule field, so the registry rules were dead), plus every fix since
+  v1.2.0 (new rules 100227, 100348, 100349, 100365, 100366, 100367; overwrites 60168,
+  60173, 60174, 204).
+- **UniFi and Proxmox v2** rules and decoders (UniFi Network 10.x CEF, PVE task/VM audit,
+  PBS 4 auth with source IP, integration-token noise handling).
+- `dashboards/homelab/homelab.ndjson` replaces the UniFi and Proxmox dashboards and adds
+  *Homelab - Security Overview*.
+
 ### Added
+- `rules/homelab/`: `109_homelab_tuning.xml` (rootcheck/FIM/sudo noise, kernel disk errors,
+  rsyslog relay log freshness) and `local_rules.xml` (Cloudflare Access, local rules).
+
+### Removed
+- `rules/linux/115_alert_tuning.xml` (comments only, no active rule).
+
+### Added (CI)
 - **CI (`.github/workflows/validate.yml`)** — every push, PR and a weekly schedule run
   two layers: a structural lint that needs no Wazuh install, and `wazuh-analysisd -t`
   against a real manager container, pinned to 4.14.3 (must pass) plus `latest` as an
-  advisory signal. The ruleset chains onto stock rule ids and reproduces eleven stock
+  advisory signal. The ruleset chains onto stock rule ids and reproduces fifteen stock
   rule bodies, so an upstream release is the likeliest way for it to break — silently,
   by no longer firing. The scheduled run catches that with no commits involved.
 - CI also asserts that `experimental/windows_normalize.xml` is **still rejected** by

@@ -1,46 +1,121 @@
-<!-- ============================================================
-     Proxmox VE + PBS — custom field-extraction decoders
-     Created 2026-07-10.
+<!--
+  Proxmox VE + PBS decoders v2 (homelab) — wazuh-review 2026-09-26
+  Replaces: /var/ossec/etc/decoders/proxmox_pve_pbs_decoders.xml (v1, 2026-07-10)
+  Parents "pvedaemon", "pveproxy", "pvestatd" are STOCK (ruleset/decoders/0440-proxmox-ve_decoders.xml).
+  Source: agents pm, pm2, pbs, pbs2 read journald (PVE 9.1 / PBS 4, Debian 13).
 
-     WHY: the shipped decoder (ruleset/decoders/0440-proxmox-ve_decoders.xml)
-     only extracts user/srcip for pvedaemon auth lines. Every other Proxmox/PBS
-     event reaches the index with NO data.* fields — detail lives only in
-     full_log free text. That is why the Proxmox dashboard panels keyed on
-     data.pve.user/.vmid/.status/.task showed nothing (those fields = 0 docs).
+  Real samples (wazuh-review/samples/proxmox_raw.tsv, raw/pm_journal_vmops.txt, raw/ix_samples_rules.json):
+    pvedaemon[3449877]: <root@pam> starting task UPID:pm:0034A637:0FA99BC6:6A7B7C89:qmdestroy:104:root@pam:
+    pvedaemon[3450423]: destroy VM 104: UPID:pm:0034A637:0FA99BC6:6A7B7C89:qmdestroy:104:root@pam:
+    pvedaemon[994837]: <root@pam> end task UPID:pm:000F55F0:...:qmshutdown:113:root@pam: VM quit/powerdown failed - got timeout
+    pvedaemon[1002411]: <root@pam> update VM 116: -tags services
+    pvestatd[1549]: pbs2_sync: error fetching datastores - 500 Can't connect to 192.0.2.10:8007 (Connection timed out)
+    pveproxy[1744484]: authentication failure: no such token 'pegaprox_000000' for user 'root@pam'
+    pvescheduler[2094024]: INFO: Finished Backup of VM 100 (00:00:33)
+    proxmox-backup-proxy[615]: authentication failure; rhost=[::ffff:192.0.2.20]:35144 msg=invalid credentials
+    proxmox-backup-api[183]: authentication failure; rhost=[::ffff:192.0.2.30]:60544 user=root@pam msg=authentication error - AUTH_ERR (7)
+    proxmox-backup-proxy[589]: unable to start datastore prune job default-pbs_backup_rep-447c200a- - unable to open chunk store at "..."
 
-     These sibling decoders parse the real log formats seen on Proxmox VE / PBS and populate:
-        srcip            (STANDARD — attacker IP on PBS brute force)
-        url              (STANDARD — PBS API path)
-        data.pve.method  data.pve.httpstatus  data.pve.status
-        data.pve.vmid    data.pve.task        data.pve.user
+  v1 bugs fixed: task decoder required "task UPID:" so "destroy VM N: UPID" / "end task ... <status>" had no fields;
+  pve-scheduler-backup "(\w+)" after the VMID never matched "(qemu)" / "(00:00:33)";
+  pveproxy "^(\d+) " failed for token errors; PBS 4 "authentication failure; rhost=" and proxmox-backup-api had no decoder.
+  Note: "<" is written as \x3c in PCRE2 to keep the XML valid.
+-->
 
-     SAFE / ADDITIVE: field extraction runs at decode time and only ADDS fields;
-     it does not consume the log or stop the existing custom rules (100355,
-     100400, 100800, 100807, 100828, …) from firing. Extraction also runs BEFORE
-     a rule's no_full_log strips full_log, so VM/CT lifecycle events (which store
-     an empty full_log) still get data.pve.* populated.
-
-     DEPLOY (optional / opt-in):
-       cp decoders/proxmox/proxmox.xml /var/ossec/etc/decoders/
-       /var/ossec/bin/wazuh-analysisd -t          # validate
-       /var/ossec/bin/wazuh-control restart
-     TEST (paste a sample line):
-       echo 'Jun 23 00:11:48 backup01 proxmox-backup-proxy[628]: GET /api2/json/admin/datastore: 401 Unauthorized: [client [::ffff:198.51.100.229]:53217] authentication failed' \
-         | /var/ossec/bin/wazuh-logtest
-
-     NOTE: decoders apply at ingest — only NEW events get these fields; the
-     rebuilt dashboard panels (rule.description / agent.name) keep working on
-     historical data. Once this is live you can add panels on data.srcip
-     (top attacking IPs) and data.pve.vmid, or restore the original data.pve.*
-     panel design for go-forward data.
-     ============================================================ -->
-
-<!-- ===== PBS: proxmox-backup-proxy =====
-     Sample: proxmox-backup-proxy[628]: GET /api2/json/admin/datastore: 401 Unauthorized: [client [::ffff:198.51.100.229]:53217] authentication failed -->
-<decoder name="pbs-backup-proxy">
-  <program_name>^proxmox-backup-proxy</program_name>
+<!-- ======================= pvedaemon (stock parent) ======================= -->
+<decoder name="pve-task">
+  <parent>pvedaemon</parent>
+  <prematch type="pcre2">^\x3c[^>]+> (?:starting|end) task UPID:</prematch>
+  <regex type="pcre2">^\x3c([^>]+)> (starting|end) task UPID:[^:]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:([A-Za-z0-9_-]+):([^:]*):([^:]+):\s?(.*)$</regex>
+  <order>pve.actor, pve.phase, pve.task, pve.vmid, pve.user, pve.status</order>
 </decoder>
 
+<decoder name="pve-guest-action">
+  <parent>pvedaemon</parent>
+  <prematch type="pcre2">^\w+ (?:VM|CT) \d+: UPID:</prematch>
+  <regex type="pcre2">^(\w+) (VM|CT) (\d+): UPID:[^:]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:([A-Za-z0-9_-]+):[^:]*:([^:]+):</regex>
+  <order>pve.action, pve.guesttype, pve.vmid, pve.task, pve.user</order>
+</decoder>
+
+<decoder name="pve-guest-update">
+  <parent>pvedaemon</parent>
+  <prematch type="pcre2">^\x3c[^>]+> update (?:VM|CT) \d+: </prematch>
+  <regex type="pcre2">^\x3c([^>]+)> update (VM|CT) (\d+): (.+)$</regex>
+  <order>pve.actor, pve.guesttype, pve.vmid, pve.params</order>
+</decoder>
+
+<decoder name="pve-daemon-storage">
+  <parent>pvedaemon</parent>
+  <prematch type="pcre2">^\S+: error fetching datastores - </prematch>
+  <regex type="pcre2">^(\S+): error fetching datastores - (.+)$</regex>
+  <order>pve.storage, pve.status</order>
+</decoder>
+
+<!-- ======================= pvestatd (stock parent) ======================= -->
+<decoder name="pve-statd-storage">
+  <parent>pvestatd</parent>
+  <prematch type="pcre2">^\S+: error fetching datastores - </prematch>
+  <regex type="pcre2">^(\S+): error fetching datastores - (.+)$</regex>
+  <order>pve.storage, pve.status</order>
+</decoder>
+
+<!-- ======================= pveproxy (stock parent) ======================= -->
+<decoder name="pve-proxy-authfail">
+  <parent>pveproxy</parent>
+  <prematch>authentication failure: </prematch>
+  <regex type="pcre2" offset="after_prematch">^(?:(\d{3}) )?(.+)$</regex>
+  <order>pve.httpstatus, pve.status</order>
+</decoder>
+<decoder name="pve-proxy-authfail">
+  <parent>pveproxy</parent>
+  <regex type="pcre2">no such token '([^']+)' for user '([^']+)'</regex>
+  <order>pve.token, pve.user</order>
+</decoder>
+
+<!-- ======================= pvescheduler (custom root) ======================= -->
+<decoder name="pve-scheduler">
+  <program_name>^pvescheduler</program_name>
+</decoder>
+<decoder name="pve-scheduler-backup">
+  <parent>pve-scheduler</parent>
+  <prematch>Backup of VM </prematch>
+  <regex type="pcre2">^(\w+): </regex>
+  <order>pve.loglevel</order>
+</decoder>
+<decoder name="pve-scheduler-backup">
+  <parent>pve-scheduler</parent>
+  <regex type="pcre2">Backup of VM (\d+)</regex>
+  <order>pve.vmid</order>
+</decoder>
+<decoder name="pve-scheduler-backup">
+  <parent>pve-scheduler</parent>
+  <regex type="pcre2">Backup of VM \d+ failed - (.+)$</regex>
+  <order>pve.status</order>
+</decoder>
+<decoder name="pve-scheduler-task">
+  <parent>pve-scheduler</parent>
+  <prematch type="pcre2">^\x3c[^>]+> (?:starting|end) task UPID:</prematch>
+  <regex type="pcre2">^\x3c([^>]+)> (starting|end) task UPID:[^:]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:([A-Za-z0-9_-]+):([^:]*):([^:]+):\s?(.*)$</regex>
+  <order>pve.actor, pve.phase, pve.task, pve.vmid, pve.user, pve.status</order>
+</decoder>
+
+<!-- ======================= PBS (custom root, proxy + api) ======================= -->
+<decoder name="pbs-backup-proxy">
+  <!-- manager: jobovi pokrenuti iz CLI-ja (npr. systemd-run "proxmox-backup-manager sync-job run") -->
+  <program_name type="pcre2">^proxmox-backup-(?:proxy|api|manager)$</program_name>
+</decoder>
+
+<!-- wazuh-review 2026-09-29: neuspjeli PBS task/job (sync, verify, prune, GC, backup)
+     "proxmox-backup-proxy[604]: TASK ERROR: no such datastore 'pbs_backup_rep'"
+     "proxmox-backup-manager[666]: TASK ERROR: sync failed with some errors." -->
+<decoder name="pbs-task-error">
+  <parent>pbs-backup-proxy</parent>
+  <prematch>TASK ERROR: </prematch>
+  <regex type="pcre2">TASK ERROR: (.+)$</regex>
+  <order>pve.status</order>
+</decoder>
+
+<!-- PBS 3.x format: "GET /api2/json/...: 401 Unauthorized: [client [::ffff:IP]:port] authentication failed" -->
 <decoder name="pbs-backup-proxy-authfail">
   <parent>pbs-backup-proxy</parent>
   <prematch>authentication failed</prematch>
@@ -48,34 +123,33 @@
   <order>pve.method, url, pve.httpstatus, srcip, pve.status</order>
 </decoder>
 
-<!-- ===== PVE scheduler (vzdump backup outcome) =====
-     Sample: pvescheduler[584736]: ERROR: Backup of VM 107 failed - lvcreate snapshot 'pve/snap_vm-107-disk-0_vzdump' error: ... -->
-<decoder name="pve-scheduler">
-  <program_name>^pvescheduler</program_name>
+<!-- PBS 4.x format: "authentication failure; rhost=[::ffff:IP]:port [user=U] msg=M" -->
+<decoder name="pbs-authfail">
+  <parent>pbs-backup-proxy</parent>
+  <prematch>authentication failure; rhost=</prematch>
+  <regex type="pcre2">rhost=\[(?:::ffff:)?([0-9a-fA-F:.]+)\]:\d+(?: user=(\S+))? msg=(.+)$</regex>
+  <order>srcip, dstuser, pve.status</order>
 </decoder>
 
-<decoder name="pve-scheduler-backup">
-  <parent>pve-scheduler</parent>
-  <prematch>Backup of VM </prematch>
-  <regex type="pcre2">Backup of VM (\d+) (\w+)</regex>
-  <order>pve.vmid, pve.status</order>
+<decoder name="pbs-job-error">
+  <parent>pbs-backup-proxy</parent>
+  <prematch>unable to start datastore </prematch>
+  <regex type="pcre2">unable to start datastore (.+?) job (\S+) - (.+)$</regex>
+  <order>pbs.jobtype, pbs.jobid, pve.status</order>
 </decoder>
 
-<!-- ===== pveproxy auth failure (parent defined in default 0440) =====
-     Sample: pveproxy[993183]: authentication failure: 401 permission denied - invalid PVE ticket -->
-<decoder name="pve-proxy-authfail">
-  <parent>pveproxy</parent>
-  <prematch>authentication failure: </prematch>
-  <regex offset="after_prematch" type="pcre2">^(\d+) (.+)$</regex>
-  <order>pve.httpstatus, pve.status</order>
+<decoder name="pbs-api-error">
+  <parent>pbs-backup-proxy</parent>
+  <prematch type="pcre2">^[A-Z]+ /api2/</prematch>
+  <regex type="pcre2">^([A-Z]+) (\S+): (\d{3}) [^:]+: \[client \[(?:::ffff:)?([0-9a-fA-F:.]+)\]:\d+\] (.+)$</regex>
+  <order>pve.method, url, pve.httpstatus, srcip, pve.status</order>
 </decoder>
 
-<!-- ===== pvedaemon task / lifecycle via UPID (parent defined in default 0440) =====
-     UPID layout: UPID:<node>:<pid>:<pstart>:<starttime>:<type>:<vmid>:<user>:
-     Sample: pvedaemon[6427]: <root@pam> starting task UPID:pve01:00000000:11111111:22222222:vzstart:100:root@pam: -->
-<decoder name="pve-daemon-task">
-  <parent>pvedaemon</parent>
-  <prematch>task UPID:</prematch>
-  <regex type="pcre2">UPID:[^:]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:[0-9A-Fa-f]+:(\w+):(\d*):([^:]*):</regex>
-  <order>pve.task, pve.vmid, pve.user</order>
+<decoder name="pbs-upload-log">
+  <parent>pbs-backup-proxy</parent>
+  <prematch>Upload backup log to datastore </prematch>
+  <!-- "... datastore 'unas_repo', root namespace ct/107/2026-...Z/client.log.blob"
+       "... datastore 'pbs2_backup_rep', namespace 'Sync/Outgoing' ct/201/2026-07-06T19:00:06Z/client.log.blob" -->
+  <regex type="pcre2">datastore '([^']+)', (?:root namespace|namespace '[^']*') (\w+)/(\d+)/(\S+?)/</regex>
+  <order>pbs.datastore, pbs.guesttype, pve.vmid, pbs.snapshot</order>
 </decoder>

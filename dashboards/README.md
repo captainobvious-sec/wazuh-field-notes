@@ -11,8 +11,7 @@ saved-search objects — **not** Lens, which does not exist in OpenSearch Dashbo
 | `windows/04-operational-health.ndjson` | Wazuh - Operational Health | `wazuh-alerts-*` + `wazuh-monitoring-*` (placeholders) | 24h, 300s auto-refresh |
 | `linux/01-security.ndjson` | Rocky Linux Security | `wazuh-alerts-*` (placeholder) | — |
 | `linux/02-syslog.ndjson` | Rocky Linux Syslog Activity | `wazuh-alerts-*` (placeholder) | — |
-| `unifi/unifi.ndjson` | UniFi - Network Security | `wazuh-alerts-4.x-*` (**bundled**) | — |
-| `proxmox/proxmox.ndjson` | Proxmox VE + PBS - Infrastructure | `wazuh-alerts-4.x-*` (**bundled**) | — |
+| `homelab/homelab.ndjson` | UniFi - Network Security; Proxmox VE + PBS - Infrastructure; Homelab - Security Overview | `wazuh-alerts-*` (id `wazuh-alerts-*`) | — |
 
 ## 1. Substitute the index-pattern IDs (Windows and Linux dashboards)
 
@@ -41,8 +40,8 @@ sed -i 's/WAZUH_ALERTS_IP_ID/<real-alerts-id>/g; s/WAZUH_MONITORING_IP_ID/<real-
 (on macOS use `sed -i ''`). TSVB panels reference the index by **title** internally, so
 they need no substitution.
 
-The UniFi and Proxmox files bundle their own `wazuh-alerts-4.x-*` index pattern and are
-self-contained — import them as-is. Both patterns point at the same alert data.
+`homelab/homelab.ndjson` references the index pattern with id `wazuh-alerts-*` directly
+(no placeholder). Import it with overwrite.
 
 ## 2. Check the Windows field schema
 

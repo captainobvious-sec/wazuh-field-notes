@@ -145,7 +145,7 @@
   </rule>
 
   <!-- 4719/4907/4912 audit policy events: all three are now covered by
-       custom rules 100351/100362/100363 in 104_ad_correlation.xml.
+       custom rules 100351/100362/100363 in 104-ad_correlation_rules.xml.
        60112 is silenced here so only the specific custom rules alert.
        NOTE: this overwrite also adds 4715 (the original default match had
        a duplicated 4719 and no 4715) — intentional and harmless. -->
@@ -230,15 +230,19 @@
   </rule>
 
   <!-- Silver Ticket — forged service ticket (4769 success).
-       Indicators: RC4 (0x17) or RC4-HMAC-EXP (0x23) encryption on a TGS for a
+       Indicators: RC4-HMAC (0x17) or RC4-HMAC-EXP (0x18) encryption on a TGS for a
        non-machine, non-krbtgt SPN, without the Kerberoasting ticket options flag.
        Parent if_sid 60106 covers 4769 (confirmed in 0580:line 78).
        Kerberoasting ticketOptions 0x40810000 is excluded so this does not overlap
-       with rule 110002 (Kerberoasting single) or 100331 (Kerberoasting burst). -->
-  <rule id="100360" level="13">
+       with rule 110002 (Kerberoasting single); it IS the feeder of 100331
+       (Kerberoasting burst) since 2026-07-11.
+       FIX 2026-09-24 (REVIEW.md F-26): 0x23 is not a Kerberos etype (-> 0x18);
+       description used subjectUserName, which 4769 does not carry (-> targetUserName);
+       level 13 -> 10 (digest heuristic; level >= 1 still feeds 100331). -->
+  <rule id="100360" level="10">
     <if_sid>60106</if_sid>
     <field name="win.system.eventID">^4769$</field>
-    <field name="win.eventdata.ticketEncryptionType" type="pcre2">0x17|0x23</field>
+    <field name="win.eventdata.ticketEncryptionType" type="pcre2">^0x1[78]$</field>
     <field name="win.eventdata.serviceName" negate="yes" type="pcre2">\$$|^krbtgt$</field>
     <field name="win.eventdata.ticketOptions" negate="yes" type="pcre2">0x40810000</field>
     <!-- ROUTING 2026-07-08: demoted to digest (no_email_alert). Any legacy RC4
@@ -246,7 +250,7 @@
          subjectUserName often absent on 4769); too FP-prone for a real-time email. -->
     <options>no_full_log</options>
     <options>no_email_alert</options>
-    <description>AD: Possible Silver Ticket — RC4 service ticket for $(win.eventdata.serviceName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <description>AD: Possible Silver Ticket — RC4 service ticket for $(win.eventdata.serviceName) requested by $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress)</description>
     <mitre>
       <id>T1558.002</id>
     </mitre>

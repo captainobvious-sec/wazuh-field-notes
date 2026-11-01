@@ -1,13 +1,13 @@
 <!--
   Rocky Linux - Lateral movement / recon / credential access
-  Load order: 113_ (after 112_persistence.xml)
+  Load order: 1113 (after persistence 1112)
   Custom ID range: 111300-111399
 
   TELEMETRY PREREQUISITES (advanced tier):
    * Command auditing. Two supported wirings:
        (a) Standard Wazuh command auditing: audit-wazuh-c key feeds rule 80792.
            The execve-content rules below chain off 80792.
-       (b) If you do NOT run 80792, deploy ingest/linux/wazuh-linux.rules and
+       (b) If you do NOT run 80792, deploy Linux/audit.rules.snippet and
            change if_sid 80792 to if_sid 80700 plus a
            field audit.key match.
    * File-access detections use dedicated audit watch keys (off 80700).
@@ -15,7 +15,13 @@
   Validate with /var/ossec/bin/wazuh-logtest. Re-point if_sid if your
   auditd command-key wiring differs.
 -->
-<group name="lateral_movement,rocky_linux,correlation,">
+<!-- FIX 2026-09-24 (REVIEW.md F-02): stock 0850 rule 92600 (level 0, if_group audit,
+     audit.exe~python) is evaluated FIRST under 80700/80792 and ends evaluation, so any
+     audited event whose executable is a Python interpreter never reached these rules
+     (python reverse shells, python credential tools). Rules that must see such actors
+     now also chain if_sid 92600 (child overrides parent), and argv tokens tolerate a
+     path prefix (a0="/usr/bin/python3" etc.). -->
+<group name="lateral_movement,rocky_linux,">
 
   <!-- ===== Internal reconnaissance [AUDIT execve via 80792] ===== -->
 
@@ -40,8 +46,8 @@
        is invisible to any argv match — accept the gap or add a decoder for the
        hex 'a1' form. Verify with wazuh-logtest. -->
   <rule id="111310" level="13">
-    <if_sid>80792</if_sid>
-    <match type="pcre2">(?i)a\d+="[^"]*/dev/(tcp|udp)/|a\d+="nc(at)?"\s+.*a\d+="-e|a\d+="socat".*a\d+="[^"]*exec|a\d+="(bash|sh|dash|zsh|ksh)"\s+a\d+="-i"|a\d+="python[0-9]?".*a\d+="-c".*socket|a\d+="perl".*a\d+="-e".*socket</match>
+    <if_sid>80792,92600</if_sid>
+    <match type="pcre2">(?i)a\d+="[^"]*/dev/(?:tcp|udp)/|a\d+="(?:[^"]*/)?nc(?:at)?"\s+.*a\d+="-e|a\d+="(?:[^"]*/)?socat".*a\d+="[^"]*exec|a\d+="(?:[^"]*/)?(?:bash|sh|dash|zsh|ksh)"\s+a\d+="-i"|a\d+="(?:[^"]*/)?python[0-9.]*".*a\d+="-c".*socket|a\d+="(?:[^"]*/)?perl".*a\d+="-e".*socket</match>
     <description>Lateral: reverse/bind shell command pattern on $(agent.name) - $(audit.command)</description>
     <mitre><id>T1059.004</id><id>T1571</id></mitre>
     <group>reverse_shell,c2_connection,</group>
@@ -87,7 +93,7 @@
 
   <!-- 111330: read of /etc/shadow or /etc/gshadow [key=rocky_cred_shadow] -->
   <rule id="111330" level="12">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key">rocky_cred_shadow</field>
     <!-- ROUTING 2026-07-08: demoted to digest; the PAM stack reads shadow on every
          local auth, so volume depends entirely on the audit watch's exclusions -
@@ -95,16 +101,16 @@
     <options>no_email_alert</options>
     <description>CredAccess: shadow/gshadow read on $(agent.name) by uid $(audit.auid) - credential dumping</description>
     <mitre><id>T1003.008</id></mitre>
-    <group>credential_access,</group>
+    <group>credential_access,credential_theft,</group>
   </rule>
 
   <!-- 111331: read/copy of an SSH private key [key=rocky_cred_sshkey] -->
   <rule id="111331" level="11">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key">rocky_cred_sshkey</field>
     <description>CredAccess: SSH private key accessed on $(agent.name) - $(audit.file.name) - key theft for pivoting</description>
     <mitre><id>T1552.004</id></mitre>
-    <group>credential_access,key_theft,</group>
+    <group>credential_access,credential_theft,key_theft,</group>
   </rule>
 
 </group>

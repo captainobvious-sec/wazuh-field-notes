@@ -11,11 +11,12 @@
      Created 2026-07-08 (alerting-discipline review).
 
      WHY THIS FILE EXISTS
-     A handful of noisy Wazuh DEFAULT rules should not e-mail, and two that ship
-     below threshold should. Editing the shipped default files
-     (/var/ossec/ruleset/rules/*) is the WRONG way to do that: a Wazuh upgrade
-     overwrites that directory. This is a CUSTOM file (/var/ossec/etc/rules/),
-     so it deploys like every other file here AND survives upgrades.
+     We must not e-mail on a handful of noisy Wazuh DEFAULT rules, and we must
+     e-mail on two that ship below threshold. Editing the shipped default files
+     (/var/ossec/ruleset/rules/*) is the WRONG way: custom deployments never
+     touch that directory, and a Wazuh upgrade overwrites it. This is a CUSTOM
+     file (etc/rules/), so it is deployed with the other custom files AND
+     survives upgrades.
 
      HOW IT WORKS
      overwrite="yes" replaces the default rule of the same id. Custom rules in
@@ -29,9 +30,16 @@
      noise source - double-emailed every remote command), 91803 screen-capture,
      60015 multiple-critical aggregate, 92650 %systemroot% service, 92655
      PrintNightmare driver-load failure, 60162/60171/60187/60188/60189
-     Guests/RODC/Crypto group changes.
+     Guests/RODC/Crypto group changes; 204 agent event queue flooded (2026-09-30,
+     all agents - in its own <group> block at the end of this file).
      (Crown-jewel group changes 60154/60156/60159/60164/60166/60167/60176 are
       NOT here - they stay Tier-1 and keep e-mailing by the level-12 threshold.)
+
+     PROMOTED (level 8-10 -> 12, e-mails; 2026-09-24, REVIEW.md F-16):
+     60168 Group Policy Creator Owners, 60173 Account Operators,
+     60174 Server Operators. (Print Operators is custom rule 100366 in 104: an
+     overwrite keeps the rule's load-time position, and stock 60175 (L8) sits behind
+     the custom generic rule 100311 (L10), so an overwrite of 60175 is never reached.)
      ============================================================ -->
 <group name="windows,default_override,">
   <rule id="91822" level="12" overwrite="yes">
@@ -158,4 +166,70 @@
     </mitre>
   </rule>
 
+  <!-- ===== PROMOTED to Tier-1 (FIX 2026-09-24, REVIEW.md F-16) =====
+       Account/Server/Print Operators can log on to DCs and modify services or
+       drivers there, and Group Policy Creator Owners can create GPOs: all are
+       tier-0-equivalent. Stock ships them at L10 (no e-mail). Bodies copied
+       from stock 0580 (if_sid/field/description/options unchanged); only the level,
+       the privilege_escalation + tier0 groups and MITRE (T1098 + T1078.002, like
+       the crown-jewel overwrites in 104) differ. Re-copy if a Wazuh upgrade
+       changes the stock bodies. -->
+  <rule id="60168" level="12" overwrite="yes">
+    <if_sid>60141,60142</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-\S+-520$</field>
+    <description>Group Policy Creator Owners Group Changed</description>
+    <options>no_full_log</options>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,pci_dss_8.1.2,pci_dss_10.2.5,gpg13_7.10,gdpr_IV_35.7.d,gdpr_IV_32.2,hipaa_164.312.a.2.I,hipaa_164.312.a.2.II,hipaa_164.312.b,nist_800_53_AC.2,nist_800_53_IA.4,nist_800_53_AU.14,nist_800_53_AC.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+  </rule>
+
+  <rule id="60173" level="12" overwrite="yes">
+    <if_sid>60144,60145</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-32-548$</field>
+    <description>Account Operators Group Changed</description>
+    <options>no_full_log</options>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,pci_dss_8.1.2,pci_dss_10.2.5,gpg13_7.10,gdpr_IV_35.7.d,gdpr_IV_32.2,hipaa_164.312.a.2.I,hipaa_164.312.a.2.II,hipaa_164.312.b,nist_800_53_AC.2,nist_800_53_IA.4,nist_800_53_AU.14,nist_800_53_AC.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+  </rule>
+
+  <rule id="60174" level="12" overwrite="yes">
+    <if_sid>60144,60145</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-32-549$</field>
+    <description>Server Operators Group Changed</description>
+    <options>no_full_log</options>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,pci_dss_8.1.2,pci_dss_10.2.5,gpg13_7.10,gdpr_IV_35.7.d,gdpr_IV_32.2,hipaa_164.312.a.2.I,hipaa_164.312.a.2.II,hipaa_164.312.b,nist_800_53_AC.2,nist_800_53_IA.4,nist_800_53_AU.14,nist_800_53_AC.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+  </rule>
+
+
+</group>
+
+<!-- ===== Wazuh agent health: applies to ALL agents, not only Windows =====
+     DEMOTED 2026-09-30 (no_email_alert): 204 "Agent event queue is flooded".
+     It sent 10-15 e-mails a day for one agent. It is an operational
+     signal, not an attack, so it goes to the dashboards, not the Tier-1 mailbox.
+     It still MATTERS: "flooded" means the agent's client buffer stayed full and
+     the agent is DISCARDING events, so that host is partly blind until the cause
+     is fixed (a noisy event channel, or a client_buffer that is too small).
+     Own <group> block because an overwrite takes the groups of the block it sits
+     in: the rule keeps the stock "wazuh" group and does not get "windows" (it
+     also fires for Linux agents and for the syslog relay).
+     Body copied from stock 0016-wazuh_rules.xml; only no_email_alert is added. -->
+<group name="wazuh,default_override,">
+  <rule id="204" level="12" overwrite="yes">
+    <if_sid>201</if_sid>
+    <field name="level">flooded</field>
+    <options>no_email_alert</options>
+    <description>Agent event queue is flooded. Check the agent configuration.</description>
+    <group>agent_flooding,pci_dss_10.6.1,gdpr_IV_35.7.d,</group>
+  </rule>
 </group>

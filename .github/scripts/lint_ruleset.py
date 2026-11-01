@@ -128,8 +128,12 @@ def check_rules():
                              f"<{tag}>{ref}</{tag}> is not defined in rules/")
 
 
+# Decoders shipped with Wazuh that custom rules may reference.
+STOCK_DECODERS = {"json", "windows_eventchannel"}
+
+
 def check_decoders():
-    names = set()
+    names = set(STOCK_DECODERS)
     for p in xml_files(DECODER_DIRS):
         names |= set(re.findall(r'<decoder name="([^"]+)"',
                                 p.read_text(encoding="utf-8", errors="replace")))
@@ -168,6 +172,9 @@ def check_dashboards():
 def check_forbidden():
     for p in sorted(ROOT.rglob("*")):
         if not p.is_file() or ".git/" in str(p) or ".github/scripts" in str(p):
+            continue
+        # private/ and CLAUDE.md are git-ignored local material, never published
+        if rel(p).parts[0] in ("private", "CLAUDE.md"):
             continue
         try:
             text = p.read_text(encoding="utf-8")

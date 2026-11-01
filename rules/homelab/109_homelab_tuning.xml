@@ -1,0 +1,83 @@
+<!--
+  Homelab tuning + health rules — wazuh-review 2026-09-26
+  New file: /var/ossec/etc/rules/109-homelab_tuning.xml   Rule range: 100950-100989
+-->
+
+<group name="homelab_tuning,">
+
+  <!-- rootcheck false positives on Debian 13 / Ubuntu 25.04 (pm, pm2, pbs, pbs2, rsyslog) - generic trojan signatures
+       from rootkit_trojans.txt match the shadow-utils binaries passwd / chfn / chsh:
+       "Trojaned version of file '/usr/bin/chfn' detected. Signature used: 'bash|file\.h|proc\.h|/dev/ttyo|/dev/[A-Z]|/dev/[a-s,uvxz]' (Generic)."
+       30 days: 11-12x per file per agent. Only these 3 binaries with the Generic signature are silenced. -->
+  <rule id="100950" level="0">
+    <if_sid>510</if_sid>
+    <regex type="pcre2">^Trojaned version of file '/(usr/)?bin/(passwd|chfn|chsh)' detected\. Signature used: .*\(Generic\)\.?$</regex>
+    <description>rootcheck: known false positive (Generic trojan signature on passwd/chfn/chsh, Debian 13 / Ubuntu 25.04)</description>
+  </rule>
+
+  <!-- LXC containers (pbs2, rsyslog): lxcfs bind-mounts /dev/.lxc/proc/* and /dev/.lxc-boot-id - rootcheck check_dev
+       reports them as hidden files ("File '/dev/.lxc/proc/meminfo' present on /dev. Possible hidden file.") -->
+  <rule id="100952" level="0">
+    <if_sid>510</if_sid>
+    <regex type="pcre2">^File '/dev/\.lxc(/proc/[\w.-]+|-boot-id)' present on /dev\. Possible hidden file\.$</regex>
+    <description>rootcheck: LXC lxcfs artefact in /dev - not a hidden file</description>
+  </rule>
+
+  <!-- FIM noise on PVE: cluster FS bookkeeping and LVM metadata backups (pm2: 200+ alerts in 30 days) -->
+  <rule id="100951" level="0">
+    <if_sid>550, 553, 554</if_sid>
+    <match>/etc/pve/.vmlist|/etc/pve/.rrd|/etc/pve/.version|/etc/pve/.members|/etc/lvm/archive/|/etc/lvm/backup/</match>
+    <description>FIM: routine Proxmox / LVM metadata change - not alerted</description>
+  </rule>
+
+  <!-- UniFi OS internal service "ucs-update" runs sudo every few minutes (~190/day) -->
+  <rule id="100955" level="0">
+    <if_sid>5402, 5403</if_sid>
+    <location>/var/log/remote/</location>
+    <match>ucs-update : PWD=/data/unifi-identity-update</match>
+    <description>sudo: UniFi OS internal ucs-update service - not alerted</description>
+  </rule>
+
+  <!-- UniFi gateway bridges enter promiscuous mode when IPS/bridge config is re-applied
+       ("UniFi-Express-7 kernel: device br10 entered promiscuous mode", 2026-09-26 after the IPS change) - stock 5104 is L8 -->
+  <rule id="100956" level="3">
+    <if_sid>5104</if_sid>
+    <location>/var/log/remote/</location>
+    <regex type="pcre2">device br\d+ entered promiscuous mode</regex>
+    <description>UniFi gateway: bridge interface entered promiscuous mode (IPS / bridge reconfiguration) - audit</description>
+    <group>network,</group>
+  </rule>
+
+  <!-- disk / filesystem errors (pm journal: "EXT4-fs (dm-23): error count since last fsck: 4") - generic Linux -->
+  <rule id="100960" level="10" ignore="3600">
+    <program_name>^kernel$</program_name>
+    <regex type="pcre2">EXT4-fs (error|\(\S+\): (error count since last fsck|initial error|last error))|Buffer I/O error|blk_update_request: (I/O|critical medium) error|I/O error, dev |XFS \(\S+\): (metadata I/O error|Corruption)</regex>
+    <description>Disk / filesystem error reported by the kernel - check storage health</description>
+    <group>storage,availability,</group>
+  </rule>
+
+  <!-- ===== "Are events arriving?" — remote log freshness on the rsyslog relay =====
+       Needs the <localfile> command in ossec-snippets/rsyslog-agent-ossec.conf.xml
+       Event: "ossec: output: 'remote-log-freshness': source=UniFi-Express-7 file=syslog.log age_min=3 threshold_min=60 stale=no"
+       Per-file thresholds are set in the command (syslog.log 60 min - always busy; cef.log 720 min - quiet at night). -->
+  <rule id="100970" level="0">
+    <if_sid>530</if_sid>
+    <match>^ossec: output: 'remote-log-freshness'</match>
+    <description>rsyslog relay: remote log freshness check</description>
+  </rule>
+
+  <rule id="100971" level="8">
+    <if_sid>100970</if_sid>
+    <regex type="pcre2">age_min=\d+ threshold_min=\d+ stale=yes$</regex>
+    <description>rsyslog relay: remote log source is silent longer than its threshold - events are not arriving</description>
+    <group>availability,log_pipeline,</group>
+  </rule>
+
+  <rule id="100972" level="8">
+    <if_sid>100970</if_sid>
+    <match>age_min=missing</match>
+    <description>rsyslog relay: expected remote log file is missing - events are not arriving</description>
+    <group>availability,log_pipeline,</group>
+  </rule>
+
+</group>

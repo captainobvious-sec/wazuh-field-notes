@@ -2,3 +2,5 @@
 *.bak
 *.disabled
 Thumbs.db
+private/
+CLAUDE.md

@@ -1,22 +1,22 @@
 <!--
   Rocky Linux - Persistence
-  Load order: 112_ (after 111_privilege_escalation.xml)
+  Load order: 1112 (after privesc 1111)
   Custom ID range: 111200-111299
 
   TELEMETRY PREREQUISITES (advanced tier):
-   * FIM (syscheck) on the paths in ingest/linux/syscheck-snippet.xml  [FIM]
+   * FIM (syscheck) on the paths in Linux/fim-directories.snippet  [FIM]
    * sshd syslog (0095) for the publickey-after-change correlation
   Validate every rule with /var/ossec/bin/wazuh-logtest.
 -->
-<group name="persistence,rocky_linux,correlation,">
+<group name="persistence,rocky_linux,">
 
   <!-- ===== SSH authorized_keys backdoor [FIM: */.ssh/authorized_keys] ===== -->
 
   <!-- 111200: an authorized_keys file was added/modified/deleted -->
   <rule id="111200" level="12">
     <if_sid>550,553,554</if_sid>
-    <field name="syscheck.path" type="pcre2">(?i)/\.ssh/authorized_keys</field>
-    <description>Persistence: SSH authorized_keys changed ($(syscheck.path)) on $(agent.name) - possible backdoor key</description>
+    <field name="file" type="pcre2">(?i)/\.ssh/authorized_keys</field>
+    <description>Persistence: SSH authorized_keys changed ($(file)) on $(agent.name) - possible backdoor key</description>
     <mitre><id>T1098.004</id></mitre>
     <group>ssh_authorized_keys,</group>
   </rule>
@@ -30,8 +30,8 @@
   <!-- 111210: cron configuration added/modified/deleted -->
   <rule id="111210" level="10">
     <if_sid>550,553,554</if_sid>
-    <field name="syscheck.path" type="pcre2">(?i)(/etc/cron|/etc/cron\.d|/etc/crontab|/var/spool/cron)</field>
-    <description>Persistence: cron configuration changed ($(syscheck.path)) on $(agent.name)</description>
+    <field name="file" type="pcre2">(?i)(/etc/cron|/etc/cron\.d|/etc/crontab|/var/spool/cron)</field>
+    <description>Persistence: cron configuration changed ($(file)) on $(agent.name)</description>
     <mitre><id>T1053.003</id></mitre>
     <group>cron_modification,</group>
   </rule>
@@ -46,8 +46,8 @@
        Excluding .wants/ paths here lets 111221 own the enable case. -->
   <rule id="111220" level="10">
     <if_sid>550,554</if_sid>
-    <field name="syscheck.path" type="pcre2">(?i)^(?!.*\.wants/)(/etc/systemd/system|/usr/lib/systemd/system|/run/systemd/system).*\.(service|timer|socket)$</field>
-    <description>Persistence: systemd unit added/modified ($(syscheck.path)) on $(agent.name)</description>
+    <field name="file" type="pcre2">(?i)^(?!.*\.wants/)(/etc/systemd/system|/usr/lib/systemd/system|/run/systemd/system).*\.(service|timer|socket)$</field>
+    <description>Persistence: systemd unit added/modified ($(file)) on $(agent.name)</description>
     <mitre><id>T1543.002</id></mitre>
     <group>systemd_persistence,</group>
   </rule>
@@ -55,11 +55,11 @@
   <!-- 111221: a unit was enabled (enable creates a .wants/ symlink, FIM add) -->
   <rule id="111221" level="12">
     <if_sid>554</if_sid>
-    <field name="syscheck.path" type="pcre2">(?i)/etc/systemd/system/.*\.wants/.*\.(service|timer)$</field>
+    <field name="file" type="pcre2">(?i)/etc/systemd/system/.*\.wants/.*\.(service|timer)$</field>
     <!-- ROUTING 2026-07-08: demoted to digest; dnf install/update enables units
          routinely. 111200 (authorized_keys) / 111240 (PAM) remain the Tier-1s. -->
     <options>no_email_alert</options>
-    <description>Persistence: systemd unit ENABLED (autostart) on $(agent.name) - $(syscheck.path)</description>
+    <description>Persistence: systemd unit ENABLED (autostart) on $(agent.name) - $(file)</description>
     <mitre><id>T1543.002</id></mitre>
     <group>systemd_persistence,</group>
   </rule>
@@ -69,8 +69,8 @@
   <!-- 111230: a shell init / profile file was modified -->
   <rule id="111230" level="9">
     <if_sid>550,554</if_sid>
-    <field name="syscheck.path" type="pcre2">(?i)(/\.(bashrc|bash_profile|profile|bash_login|zshrc)$|/etc/profile|/etc/profile\.d/|/etc/bashrc)</field>
-    <description>Persistence: shell init/profile file changed ($(syscheck.path)) on $(agent.name)</description>
+    <field name="file" type="pcre2">(?i)(/\.(bashrc|bash_profile|profile|bash_login|zshrc)$|/etc/profile|/etc/profile\.d/|/etc/bashrc)</field>
+    <description>Persistence: shell init/profile file changed ($(file)) on $(agent.name)</description>
     <mitre><id>T1546.004</id></mitre>
     <group>shell_profile_modification,</group>
   </rule>
@@ -80,8 +80,8 @@
   <!-- 111240: PAM configuration or module changed -->
   <rule id="111240" level="13">
     <if_sid>550,553,554</if_sid>
-    <field name="syscheck.path" type="pcre2">(?i)(/etc/pam\.d/|/etc/security/|/lib64/security/|/usr/lib64/security/.*\.so)</field>
-    <description>Persistence: PAM configuration/module changed ($(syscheck.path)) on $(agent.name) - auth backdoor suspected</description>
+    <field name="file" type="pcre2">(?i)(/etc/pam\.d/|/etc/security/|/lib64/security/|/usr/lib64/security/.*\.so)</field>
+    <description>Persistence: PAM configuration/module changed ($(file)) on $(agent.name) - auth backdoor suspected</description>
     <mitre><id>T1556.003</id></mitre>
     <group>pam_modification,</group>
   </rule>
@@ -91,8 +91,8 @@
   <!-- 111250: a known attack tool binary appeared in a system path -->
   <rule id="111250" level="11">
     <if_sid>554</if_sid>
-    <field name="syscheck.path" type="pcre2">(?i)/(ncat|netcat|socat|nmap|masscan|hydra|john|hashcat|chisel|mimipenguin|linpeas|pspy)(\.|$)</field>
-    <description>Persistence/Tooling: attack tool binary appeared on $(agent.name) - $(syscheck.path)</description>
+    <field name="file" type="pcre2">(?i)/(ncat|netcat|socat|nmap|masscan|hydra|john|hashcat|chisel|mimipenguin|linpeas|pspy)(\.|$)</field>
+    <description>Persistence/Tooling: attack tool binary appeared on $(agent.name) - $(file)</description>
     <mitre><id>T1105</id><id>T1588.002</id></mitre>
     <group>attack_tool_install,</group>
   </rule>

@@ -1,6 +1,7 @@
 <!--
   Rocky Linux - Authentication correlation
-  Load order: 110_ (loads after the default ruleset, before privesc/persistence)
+  Load order: 1110 (renamed from 0110 on 2026-07-04: analysisd sorts ALL rule files
+  together by filename, so custom files must sort after stock 0999-*)
   Custom ID range: 111000-111099
   Telemetry: pure syslog (sshd 0095, sudo/su/useradd in 0020, PAM in 0085).
              Works on a default agent - NO auditd/FIM required.
@@ -12,7 +13,7 @@
   This replaces the old broken pattern (if_sid freq-rule + match on another event),
   which required one log line to be two different events at once.
 -->
-<group name="authentication,rocky_linux,correlation,">
+<group name="authentication,rocky_linux,">
 
   <!-- =====
        SSH brute force then success
@@ -32,19 +33,20 @@
          40112 and a strictly higher level wins the event. If a live 4624 test
          shows 40112 still winning, re-parent 111000 under 40112 instead
          (child-overrides-parent). Confirm on a live agent.
-       - Lowered frequency 8->3, timeframe 120->300s. With the empirical OSSEC
-         "fires around the (N+4)th matching event" quirk, frequency=8 effectively
-         needed ~12 failures, so a real ~8-failure burst-then-success (e.g. the
-         198.51.100.77 root sample) never tripped it. freq=3 (effective ~7) fires
-         on that sample and on realistic brute-then-success, above casual mistypes.
+       - FIX 2026-09-24 (REVIEW.md F-10): frequency 3 -> 5 and <same_user />.
+         The earlier "fires around the (N+4)th event" rationale was withdrawn by the
+         2026-07-04 per-rule validation (frequency=N fires on the Nth event), so freq=3
+         e-mailed after ~3 typos, and without a user key one admin's failures plus
+         another admin's login through a shared bastion/NAT address also paged.
        Tier-1 (emails by level); 111001 (root) chains from it. -->
-  <rule id="111000" level="13" frequency="3" timeframe="300">
+  <rule id="111000" level="13" frequency="5" timeframe="300">
     <if_sid>5715</if_sid>
     <if_matched_sid>5760</if_matched_sid>
     <same_srcip />
+    <same_user />
     <description>SSH: login SUCCEEDED from $(srcip) after a brute-force burst on $(agent.name) - account likely compromised</description>
     <mitre><id>T1110.001</id><id>T1078</id></mitre>
-    <group>brute_force,attack_success,authentication_success,</group>
+    <group>brute_force,attack_success,authentication_success,correlation,</group>
   </rule>
 
   <!-- 111001: the successful login above was to root -->
@@ -53,7 +55,7 @@
     <match>for root from</match>
     <description>SSH: ROOT login succeeded from $(srcip) after brute force on $(agent.name)</description>
     <mitre><id>T1110.001</id><id>T1078.003</id></mitre>
-    <group>brute_force,attack_success,root_login,</group>
+    <group>brute_force,attack_success,root_login,correlation,</group>
   </rule>
 
   <!-- 111002: distributed brute force - same target user, many source IPs -->
@@ -63,7 +65,7 @@
     <different_srcip />
     <description>SSH: distributed brute force against user $(dstuser) from multiple IPs on $(agent.name)</description>
     <mitre><id>T1110.001</id></mitre>
-    <group>brute_force,distributed_attack,</group>
+    <group>brute_force,distributed_attack,correlation,</group>
   </rule>
 
   <!-- =====
@@ -91,7 +93,7 @@
     <options>no_email_alert</options>
     <description>Sudo: $(srcuser) escalated to root after repeated sudo failures on $(agent.name)</description>
     <mitre><id>T1548.003</id></mitre>
-    <group>privilege_escalation,attack_success,</group>
+    <group>privilege_escalation,attack_success,correlation,</group>
   </rule>
 
   <!-- =====
@@ -115,7 +117,7 @@
     <program_name type="pcre2">^(sshd|login|su|sudo|gdm|gdm-password|sddm|systemd-user)</program_name>
     <description>Auth: session opened for $(user) after repeated PAM failures on $(agent.name) - su/login brute force succeeded</description>
     <mitre><id>T1110</id><id>T1078</id></mitre>
-    <group>authentication_success,attack_success,</group>
+    <group>authentication_success,attack_success,correlation,</group>
   </rule>
 
   <!-- 111021: that successful-after-failure login happened off-hours -->
@@ -124,7 +126,7 @@
     <time>22:00-06:00</time>
     <description>Auth: off-hours login after failures for $(user) on $(agent.name)</description>
     <mitre><id>T1078</id></mitre>
-    <group>after_hours_login,suspicious_login,</group>
+    <group>after_hours_login,suspicious_login,correlation,</group>
   </rule>
 
   <!-- 111022: that successful-after-failure login happened on a weekend -->
@@ -133,7 +135,7 @@
     <weekday>weekends</weekday>
     <description>Auth: weekend login after failures for $(user) on $(agent.name)</description>
     <mitre><id>T1078</id></mitre>
-    <group>after_hours_login,suspicious_login,</group>
+    <group>after_hours_login,suspicious_login,correlation,</group>
   </rule>
 
   <!-- =====
@@ -153,7 +155,7 @@
     <program_name type="pcre2">^(usermod|gpasswd|groupmems)</program_name>
     <match type="pcre2">(?i)(add '?[^' ]+'? to (shadow )?group '?(wheel|sudo|adm)'?|added by \S+ to group (wheel|sudo|adm)\b)</match>
     <description>Account: user added to a privileged group (wheel/sudo/adm) on $(agent.name)</description>
-    <mitre><id>T1136.001</id><id>T1098</id></mitre>
+    <mitre><id>T1098</id></mitre>
     <group>account_manipulation,privilege_escalation,</group>
   </rule>
 

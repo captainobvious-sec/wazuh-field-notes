@@ -1,0 +1,77 @@
+<!-- Local rules -->
+
+<!-- Modify it at your will. -->
+<!-- Copyright (C) 2015, Wazuh Inc. -->
+
+<!-- Example -->
+<group name="detect_usb_storage,">
+  <rule id="100016" level="7">
+    <if_sid>530</if_sid>
+    <match>^ossec: output: 'check_usb_connetivity':</match>
+    <description>New USB device connected</description>
+  </rule>
+</group>
+
+
+<group name="attack,">
+  <rule id="100100" level="10">
+    <if_group>web|attack|attacks</if_group>
+    <list field="srcip" lookup="address_match_key">etc/lists/blacklist-alienvault</list>
+    <description>IP address found in AlienVault reputation database.</description>
+  </rule>
+</group>
+
+<group name="windows, detection,">
+  <rule id="100010" level="7">
+    <if_sid>60107</if_sid> <!-- This checks for Windows Process Creation -->
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)whoami</field>
+    <description>Suspicious Reconnaissance Command Detected: whoami</description>
+    <mitre>
+      <id>T1033</id> <!-- System Owner/User Discovery -->
+    </mitre>
+  </rule>
+</group>
+
+<group name="powershell,">
+  <rule id="100020" level="5">
+    <if_sid>60009</if_sid> <!-- Base ID for generic windows logs -->
+    <field name="win.system.eventID">^4103$</field>
+    <description>PowerShell Module Logging: Command Execution</description>
+    <options>no_full_log</options>
+  </rule>
+</group>
+
+<!-- 90001 uklonjen (wazuh-review 2026-09-26): if_matched_sid prima samo JEDAN ID; analysisd pri svakom startu: (7615) Invalid if_matched_sid value, Rule 90001 will be ignored. -->
+
+<group name="cloudflare,access,">
+  <!-- Cloudflare Access authentication events, ingested by
+       /usr/local/bin/cf-access-poller.sh on the Ghost host.
+       This is the ONLY source of failed Ghost-admin logins: Cloudflare
+       rejects unauthenticated requests at the edge, so they never reach
+       nginx or Ghost and cannot be seen from the host at all. -->
+  <rule id="100900" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="log_source">cloudflare_access</field>
+    <description>Cloudflare Access: $(action) by $(user_email) from $(ip_address) [$(country)] for $(app_domain)</description>
+  </rule>
+
+  <rule id="100901" level="5">
+    <if_sid>100900</if_sid>
+    <field name="allowed">true</field>
+    <description>Cloudflare Access ALLOWED: $(user_email) from $(ip_address) [$(country)] for $(app_domain)</description>
+  </rule>
+
+  <!-- Someone reached the admin door and was refused. -->
+  <rule id="100902" level="8">
+    <if_sid>100900</if_sid>
+    <field name="allowed">false</field>
+    <description>Cloudflare Access DENIED: $(user_email) from $(ip_address) [$(country)] for $(app_domain)</description>
+  </rule>
+
+  <!-- Repeated denials from one source = credential probing. -->
+  <rule id="100903" level="12" frequency="5" timeframe="300">
+    <if_matched_sid>100902</if_matched_sid>
+    <same_field>ip_address</same_field>
+    <description>Cloudflare Access: 5+ denied attempts from $(ip_address) in 5 minutes</description>
+  </rule>
+</group>

@@ -17,11 +17,19 @@
        The Windows twin of Linux 40112/111000. 100211 = remote/RDP 4625 failures
        (carries win.eventdata.ipAddress); 100201 = successful RDP logon (type 10).
        same_field ipAddress is proven working on this build (rule 100215 uses it).
-       freq=3 accounts for the OSSEC N+4 quirk (effective ~7 failures). -->
-  <rule id="100604" level="13" frequency="3" timeframe="300">
+       FIX 2026-09-24 (REVIEW.md F-07): now keyed on source IP AND target user, with
+       frequency 5. The old "freq=3 accounts for the OSSEC N+4 quirk" note was wrong
+       (frequency=N fires on the Nth matching event, validated 2026-07-04), and IP-only
+       paged whenever one user mistyped and another user logged on through the same
+       RD Gateway / NAT address.
+       OPTIONAL once the addresses are known: exclude RD Gateway / broker / jump-host
+       source IPs with a negated field, e.g.
+       <field name="win.eventdata.ipAddress" negate="yes" type="pcre2">^(?:::ffff:)?10\.4\.X\.Y$</field> -->
+  <rule id="100604" level="13" frequency="5" timeframe="300">
     <if_sid>100201</if_sid>
     <if_matched_sid>100211</if_matched_sid>
     <same_field>win.eventdata.ipAddress</same_field>
+    <same_field>win.eventdata.targetUserName</same_field>
     <options>no_full_log</options>
     <description>AD: RDP logon SUCCEEDED from $(win.eventdata.ipAddress) after a burst of RDP/remote logon failures — possible successful RDP brute force / account takeover</description>
     <mitre>

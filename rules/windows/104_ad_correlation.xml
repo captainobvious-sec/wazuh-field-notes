@@ -23,7 +23,7 @@
     4757 u-grp rem     100315  60103       -> 60152
     5136 ds-modified   100350  60103       -> 60229
     4719 audit policy  100351  60103       -> 60112
-    1102 log cleared   100352  60103,60104 -> 60117   (CRITICAL: see note)
+    1102 log cleared   100352  63103 (60001 -> 60017 -> 63108 -> 63103; see rule)
 
   GROUP-MEMBERSHIP NOTE (100310-100315): the default ruleset already
   has tier-0 SID-specific rules under 60141/60142/60144/60145/60151/60152
@@ -61,6 +61,8 @@
   <rule id="100301" level="13" frequency="5" timeframe="120">
     <if_matched_sid>100300</if_matched_sid>
     <options>no_full_log</options>
+    <!-- FIX 2026-09-24 (REVIEW.md F-13): Tier-2 per the tier model - digest, not e-mail. -->
+    <options>no_email_alert</options>
     <description>AD: Multiple account lockouts detected — possible brute-force</description>
     <mitre>
       <id>T1110</id>
@@ -253,6 +255,13 @@
   <rule id="100321" level="8">
     <if_sid>60103</if_sid>
     <field name="win.system.eventID">^4670$</field>
+    <!-- FIX 2026-09-30 (live test, REVIEW.md 11.11): 4670 was dropped by the Windows
+         agent filter until the new windows-servers config; once collected, this rule
+         fired ~600 times an hour on 13 lab servers - computer accounts (svchost.exe,
+         services.exe) changing Token object DACLs. Machine accounts and Token objects
+         are routine; user-made permission changes still fire. -->
+    <field name="win.eventdata.subjectUserName" negate="yes" type="pcre2">\$$</field>
+    <field name="win.eventdata.objectType" negate="yes" type="pcre2">(?i)^Token$</field>
     <options>no_full_log</options>
     <description>AD: Permissions changed on object by $(win.eventdata.subjectUserName)</description>
     <mitre>
@@ -296,10 +305,9 @@
   <!-- ============================================================
        SECTION 5 — Attack Detection (Kerberoasting, DCSync)
 
-       100331 correlates on 110002 (Kerberoasting base rule in
-       local_rules.xml). 110002 was itself silenced (it sat under 60103
-       as a sibling of 60106, which matches 4769); it has now been
-       re-parented to 60106, so 110002 fires and this correlation works.
+       100331 correlates on 100360 (the RC4-TGS catch-all in 103-local_rules)
+       since 2026-07-11; 110002 needs ticketOptions 0x40810000, which impacket
+       does not send, so it could not feed the burst.
 
        100332 (DCSync via 4662): no default rule matches 4662, so it
        fires correctly under 60103 — left unchanged.
@@ -315,8 +323,29 @@
   <rule id="100331" level="14" frequency="8" timeframe="120">
     <if_matched_sid>100360</if_matched_sid>
     <same_field>win.eventdata.ipAddress</same_field>
+    <!-- FIX 2026-09-24 (REVIEW.md F-08): also key on the requesting account. Without it,
+         RDS/Citrix/app servers (many users behind one IP) paged whenever RC4 SPNs exist. -->
+    <same_field>win.eventdata.targetUserName</same_field>
     <options>no_full_log</options>
     <description>AD: Kerberoasting in progress — multiple RC4 TGS requests from same source</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+    <group>attack,credential_theft,kerberoasting,</group>
+  </rule>
+
+  <!-- Kerberoasting burst, twin of 100331 for the ticketOptions 0x40810000 variant.
+       FIX 2026-09-30 (live test, REVIEW.md 11.13): .NET-based tools (PowerView
+       Invoke-Kerberoast, KerberosRequestorSecurityToken) send 0x40810000, so every
+       request ends at 110002 and never feeds 100331, which counts 100360 (the impacket
+       variant). if_matched_sid takes a single SID, hence a second burst rule with the
+       same keys and threshold. Lab: 8 RC4 requests from DC01 = 8 x 110002, no burst. -->
+  <rule id="100367" level="14" frequency="8" timeframe="120">
+    <if_matched_sid>110002</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <same_field>win.eventdata.targetUserName</same_field>
+    <options>no_full_log</options>
+    <description>AD: Kerberoasting in progress — multiple RC4 TGS requests (.NET / PowerView style) from same source</description>
     <mitre>
       <id>T1558.003</id>
     </mitre>
@@ -369,12 +398,16 @@
     <if_sid>60103</if_sid>
     <field name="win.system.eventID">^4688$</field>
     <field name="win.eventdata.newProcessName">\\net\.exe$|\\net1\.exe$</field>
+    <!-- FIX 2026-09-24 (REVIEW.md F-20): only enumeration verbs (net use / net time in logon
+         scripts tripped the L13 burst 100342 every morning) and no machine accounts. -->
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\bnet1?(?:\.exe)?"?\s+(?:user|group|localgroup|accounts|view|share|session)\b</field>
+    <field name="win.eventdata.subjectUserName" negate="yes" type="pcre2">\$$</field>
     <options>no_full_log</options>
     <description>AD: net.exe execution detected on $(win.system.computer) by $(win.eventdata.subjectUserName)</description>
     <mitre>
       <id>T1087.002</id>
     </mitre>
-    <group>attack,reconnaissance,process_creation,</group>
+    <group>attack,recon,reconnaissance,process_creation,</group>
   </rule>
 
   <!-- Burst of net.exe from same user — enumeration/recon -->
@@ -387,7 +420,7 @@
     <mitre>
       <id>T1087.002</id>
     </mitre>
-    <group>attack,reconnaissance,</group>
+    <group>attack,recon,reconnaissance,</group>
   </rule>
 
   <!-- ============================================================
@@ -399,19 +432,33 @@
        shadow the specific AdminSDHolder detection 100359 below (both are
        children of 60229; siblings match by load order and this one is defined
        first, so without the negation it swallowed every 5136 incl. AdminSDHolder). -->
-  <rule id="100350" level="10">
+  <rule id="100350" level="5">
     <if_sid>60229</if_sid>
     <field name="win.system.eventID">^5136$</field>
     <field name="win.eventdata.objectDN" negate="yes" type="pcre2">(?i)AdminSDHolder</field>
     <options>no_full_log</options>
     <description>AD: Directory object modified — $(win.eventdata.objectDN) by $(win.eventdata.subjectUserName)</description>
     <mitre>
+      <id>T1484</id>
+    </mitre>
+    <group>policy_changed,directory_changed,</group>
+  </rule>
+
+  <!-- FIX 2026-09-24 (REVIEW.md F-18): 100350 fired L10 "T1484.001 GPO modification" on
+       EVERY audited 5136. It is now L5 generic; Group Policy objects get this rule. -->
+  <rule id="100365" level="10">
+    <if_sid>60229</if_sid>
+    <field name="win.system.eventID">^5136$</field>
+    <field name="win.eventdata.objectDN" type="pcre2">(?i)CN=\{[0-9A-F-]{36}\},CN=Policies,CN=System,</field>
+    <options>no_full_log</options>
+    <description>AD: Group Policy object modified — $(win.eventdata.objectDN) by $(win.eventdata.subjectUserName)</description>
+    <mitre>
       <id>T1484.001</id>
     </mitre>
     <group>policy_changed,gpo_changed,</group>
   </rule>
 
-  <!-- Audit Policy Changed — 60112 (103_local_rules.xml) is overwritten to
+  <!-- Audit Policy Changed — 60112 (103-local_rules.xml) is overwritten to
        level=0 so only these specific custom rules generate alerts.
        4907/4912 coverage added here so 60112 can be safely silenced. -->
   <rule id="100351" level="12">
@@ -582,7 +629,7 @@
 
   <!-- 5136 — AdminSDHolder object modification.
        AdminSDHolder tampering grants persistent privileged access via SDProp.
-       Parent 60229 is the level=0 overwrite in 103_local_rules.xml; level=0
+       Parent 60229 is the level=0 overwrite in 103-local_rules.xml; level=0
        parents still route events to children. -->
   <rule id="100359" level="15">
     <if_sid>60229</if_sid>
@@ -591,7 +638,7 @@
     <options>no_full_log</options>
     <description>AD: AdminSDHolder object modified — SDProp persistence by $(win.eventdata.subjectUserName)</description>
     <mitre>
-      <id>T1484.001</id>
+      <id>T1098</id>
     </mitre>
     <group>attack,persistence,ad_persistence,</group>
   </rule>
@@ -755,6 +802,52 @@
     <field name="win.eventdata.targetUserName" type="pcre2">(?i)^Enterprise Admins$</field>
     <options>no_full_log</options>
     <description>AD CROWN-JEWEL (name-match): Enterprise Admins membership changed — member $(win.eventdata.memberName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <!-- FIX 2026-09-24 (REVIEW.md F-16): Tier-0 completeness.
+       DnsAdmins can load a DLL into the DNS service on DCs (-> SYSTEM on a DC) and has
+       no well-known RID, so it is matched by NAME. Key Admins (RID 526, global) and
+       Enterprise Key Admins (RID 527, universal) can write msDS-KeyCredentialLink
+       (shadow credentials) on any account and had no rule at all.
+       Account/Server Operators and GPCO are promoted in 108-default_overrides;
+       Print Operators is 100366 below. -->
+  <rule id="100348" level="12">
+    <if_sid>60144,60145</if_sid>
+    <field name="win.system.eventID">^4732$|^4733$</field>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^DnsAdmins$</field>
+    <options>no_full_log</options>
+    <description>AD TIER-0: DnsAdmins membership changed — member $(win.eventdata.memberName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <!-- Print Operators (S-1-5-32-550): can load drivers / log on to DCs. Custom rule rather
+       than an overwrite of stock 60175 (L8), whose fixed position is behind 100311. -->
+  <rule id="100366" level="12">
+    <if_sid>60144,60145</if_sid>
+    <field name="win.eventdata.targetSid">^S-1-5-32-550$</field>
+    <options>no_full_log</options>
+    <description>AD TIER-0: Print Operators membership changed — member $(win.eventdata.memberName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+    <group>group_changed,win_group_changed,privilege_escalation,tier0,</group>
+  </rule>
+
+  <rule id="100349" level="12">
+    <if_sid>60141,60142,60151,60152</if_sid>
+    <field name="win.eventdata.targetSid" type="pcre2">^S-1-5-21-[\d-]+-52[67]$</field>
+    <options>no_full_log</options>
+    <description>AD TIER-0: Key Admins / Enterprise Key Admins membership changed — group $(win.eventdata.targetUserName), member $(win.eventdata.memberName) by $(win.eventdata.subjectUserName) on $(win.system.computer)</description>
     <mitre>
       <id>T1098</id>
       <id>T1078.002</id>

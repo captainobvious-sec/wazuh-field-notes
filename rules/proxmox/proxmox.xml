@@ -1,405 +1,393 @@
 <!--
-  Environment: Proxmox VE + PBS
-  Agent name: [FILL IN PVE node hostname(s)] + [FILL IN PBS hostname]
-  Rule range: 100800-100899 (PVE: 100800-100849, PBS: 100850-100899)
-  Last updated: 2026-06-04
-  Default rule dependencies: 5700-series (sshd), 5300-series (PAM) where applicable
-  Decoder dependencies: default Wazuh decoders only — NO custom Proxmox/PBS decoder
-                        exists. All matching is done via the default predecoder
-                        (program_name + full log) using <program_name> + <match>/
-                        <regex>. All data.pve.* / data.pbs.* field references from
-                        the original reference DO NOT EXIST and have been removed.
-  REALIGNMENT NOTE: Correlations that cannot key on a Wazuh-standard field (e.g.
-    mass VM ops by user, consecutive backup failures by store) correlate on the
-    matched PARENT rule only, since the relevant value is inside the raw message
-    text and not extracted into a field. This is documented per rule.
-  STOCK-RULE CHAINING NOTE (2026-07-09): Wazuh ships 0495-proxmox-ve_rules.xml
-    (87200 = level-0 grouping of everything decoded_as pvedaemon, 87201 auth
-    fail, 87202 brute, 87203 auth success). Custom ROOT rules matching pvedaemon
-    events were SHADOWED by 87200 (first matching root wins, stock loads first)
-    and never fired; pveproxy auth failures were claimed by stock syslog rule
-    2501. All pvedaemon-sourced rules below therefore chain via <if_sid> onto
-    87200/87201/87203 (and 2501 for pveproxy). Rules for daemons with no stock
-    coverage (pveum, pvescheduler, vzdump, pvestatd, corosync, pmxcfs,
-    proxmox-backup-proxy) remain root rules.
+  Proxmox VE + PBS rules v2 (homelab) — wazuh-review 2026-09-26
+  Replaces: /var/ossec/etc/rules/proxmox_rules.xml (v1, 2026-07-09)
+  Requires: decoders/proxmox_pve_pbs_decoders.xml v2
+  Agents: pm, pm2 (PVE 9.1, standalone, not clustered), pbs, pbs2 (PBS 4) — journald
+  Rule range: 100800-100899
+
+  WHY v2 (evidence in IZVJESTAJ.md):
+    * 100806 "login succeeded after brute force" (level 12) fired 73x = PegaProx on pm2 using a
+      non-existent API token ("no such token 'pegaprox_000000'", 2,206 failures) followed by a normal
+      root@pam login. Token/ticket errors are now a separate low-level rule and do not feed brute force.
+    * 100815 looked for "delete VM" - PVE logs "destroy VM 104: UPID:...:qmdestroy:...". Never fired.
+    * 100810/100811 (pveum) can never fire: user/token/ACL changes are NOT written to journald by PVE
+      (only to /var/log/pveproxy/access.log) -> replaced by FIM on /etc/pve access-control files.
+    * PBS 100860/100862/100865/100866 matched texts that PBS 4 only writes to task logs, never journald.
+      Real journald texts ("unable to open chunk store", "unable to start datastore ... job",
+      "Upload backup log to datastore") are covered now.
+    * Correlations had no same_srcip/same_field (they counted events from ALL agents together).
+
+  RETIRED IDs (do not reuse): 100810, 100811, 100855, 100856, 100857, 100860, 100861, 100865, 100866
 -->
-<group name="proxmox_custom,">
 
-  <!-- ============================================================ -->
-  <!-- PROXMOX VE — AUTHENTICATION & ACCESS (100800–100814)         -->
-  <!-- program_name: pvedaemon / pveproxy                           -->
-  <!-- ============================================================ -->
+<group name="proxmox,">
 
-  <!-- Rule ID: 100800 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- PVE authentication failure (single). Chains stock 87201 (pvedaemon path)
-       and stock 2501 (pveproxy path, generic syslog auth failure); a plain root
-       rule here never fires because those stock rules claim the event first. -->
+  <!-- ================================================================== -->
+  <!-- PVE AUTHENTICATION                                                 -->
+  <!-- ================================================================== -->
+
+  <!-- pveproxy "authentication failure: ..." is claimed by stock 2501 (verified in logtest). -->
   <rule id="100800" level="5">
-    <if_sid>87201,2501</if_sid>
-    <program_name>pvedaemon|pveproxy</program_name>
+    <if_sid>2501</if_sid>
+    <program_name>^pveproxy$</program_name>
     <match>authentication failure</match>
-    <description>Proxmox VE – Authentication failure (pvedaemon/pveproxy) – credential probing against web UI / API</description>
-    <group>proxmox,authentication,</group>
+    <description>Proxmox VE: API/web authentication failure: $(pve.status)</description>
     <mitre><id>T1110</id></mitre>
+    <group>authentication_failed,</group>
   </rule>
 
-  <!-- Rule ID: 100801 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- PVE brute force: 5+ failures in 120s. Correlates on parent (rhost not a -->
-  <!-- standard srcip field unless default decoder extracted it; uses same_field rhost). -->
+  <!-- Stale token / expired ticket = broken integration (PegaProx, Pulse), not password guessing -->
+  <rule id="100802" level="4">
+    <if_sid>100800</if_sid>
+    <regex type="pcre2">(?i)no such token|invalid token|invalid PVE ticket|ticket expired|invalid ticket</regex>
+    <description>Proxmox VE: API token/ticket rejected - $(pve.status) - integration misconfigured</description>
+    <group>authentication_failed,integration,</group>
+  </rule>
+
+  <rule id="100803" level="7" frequency="20" timeframe="600" ignore="3600">
+    <if_matched_sid>100802</if_matched_sid>
+    <same_location />
+    <description>Proxmox VE: 20+ rejected API tokens/tickets in 10 min - an integration keeps failing (e.g. PegaProx)</description>
+    <group>authentication_failed,integration,</group>
+  </rule>
+
   <rule id="100801" level="10" frequency="5" timeframe="120">
     <if_matched_sid>100800</if_matched_sid>
-    <description>Proxmox VE – Brute force detected: 5+ auth failures in 120s (pvedaemon) – sustained credential attack. NOTE: correlates on parent rule 100800; rhost is inside the raw message, not a standard field.</description>
-    <group>proxmox,authentication,</group>
+    <same_location />
+    <description>Proxmox VE: 5+ API/web authentication failures in 2 min</description>
     <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,</group>
   </rule>
 
-  <!-- Rule ID: 100805 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- PVE successful auth (parent for success-after-failure).
-       Chains stock 87203 (child of 87200) which claims these events. -->
+  <!-- pvedaemon password failure ("authentication failure; rhost=IP user=U@realm msg=...").
+       Stock decoder pvedaemon-auth-failed extracts srcip/user. Chained on BOTH candidates because
+       the claiming rule (stock 87201 vs generic 2501) must be confirmed in the sandbox (no real sample yet). -->
+  <rule id="100804" level="6">
+    <if_sid>87201, 2501</if_sid>
+    <program_name>^pvedaemon$</program_name>
+    <match>authentication failure; rhost=</match>
+    <description>Proxmox VE: login failed for $(dstuser) from $(srcip)</description>
+    <mitre><id>T1110</id></mitre>
+    <group>authentication_failed,</group>
+  </rule>
+
+  <rule id="100806" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>100804</if_matched_sid>
+    <same_srcip />
+    <description>Proxmox VE: brute force - 5+ failed logins in 2 min from $(srcip)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,</group>
+  </rule>
+
   <rule id="100805" level="3">
     <if_sid>87203</if_sid>
     <match>successful auth for user</match>
-    <description>Proxmox VE – Successful authentication (pvedaemon)</description>
-    <group>proxmox,authentication,</group>
+    <description>Proxmox VE: successful login $(dstuser)</description>
+    <group>authentication_success,</group>
     <options>no_full_log</options>
   </rule>
 
-  <!-- Rule ID: 100806 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- PVE success after prior failures -->
-  <rule id="100806" level="12">
-    <if_sid>100805</if_sid>
-    <if_matched_sid>100801</if_matched_sid>
-    <description>Proxmox VE – Login SUCCEEDED after prior brute force – likely compromised credentials. NOTE: correlates on prior 100801 firing on the same agent.</description>
-    <group>proxmox,authentication,</group>
-    <mitre><id>T1078</id></mitre>
-  </rule>
-
-  <!-- Rule ID: 100807 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- root@pam login to PVE (always alert). PVE quotes the username in the log
-       ("successful auth for user 'root@pam'"), so the match must include the quote. -->
-  <rule id="100807" level="8">
+  <!-- root@pam: lowered 8 -> 5 (3,448 alerts, mostly automation). Raise again once PegaProx/Pulse use own users/tokens. -->
+  <rule id="100807" level="5">
     <if_sid>100805</if_sid>
     <match>successful auth for user 'root@pam'</match>
-    <description>Proxmox VE – root@pam login – privileged infrastructure account use</description>
-    <group>proxmox,authentication,</group>
+    <description>Proxmox VE: root@pam login</description>
     <mitre><id>T1078.003</id></mitre>
+    <group>authentication_success,</group>
   </rule>
 
-  <!-- Rule ID: 100810 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- New user created or added to admin group (pveum) -->
-  <rule id="100810" level="8">
-    <program_name>pveum</program_name>
-    <regex type="pcre2">(?i)(adding user |create user |to group 'Admin)</regex>
-    <description>Proxmox VE – New user created or added to admin group (pveum) – possible persistence</description>
-    <group>proxmox,authentication,</group>
-    <mitre><id>T1136</id></mitre>
+  <rule id="100808" level="12">
+    <if_sid>100805</if_sid>
+    <if_matched_sid>100806</if_matched_sid>
+    <same_location />
+    <description>Proxmox VE: login SUCCEEDED shortly after a password brute force - possible compromised credentials</description>
+    <mitre><id>T1078</id><id>T1110</id></mitre>
+    <group>authentication_success,</group>
   </rule>
 
-  <!-- Rule ID: 100811 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- User deleted (audit) -->
-  <rule id="100811" level="6">
-    <program_name>pveum</program_name>
-    <match>delete user </match>
-    <description>Proxmox VE – User account deleted (pveum) – account access removal audit</description>
-    <group>proxmox,authentication,</group>
-    <mitre><id>T1531</id></mitre>
+  <!-- Access-control changes (users, tokens, TFA, realms, ACL) - PVE does not log them to journald.
+       FIM (default <syscheck> covers /etc, scan every 12 h) is the only source without access.log. -->
+  <rule id="100812" level="10">
+    <if_sid>550, 553, 554</if_sid>
+    <match>/etc/pve/user.cfg|/etc/pve/priv/token.cfg|/etc/pve/priv/tfa.cfg|/etc/pve/domains.cfg|/etc/pve/priv/shadow.cfg</match>
+    <description>Proxmox VE: access-control configuration changed (users / API tokens / TFA / realms / ACL)</description>
+    <mitre><id>T1098</id><id>T1136</id></mitre>
+    <group>account_changed,syscheck,</group>
   </rule>
 
-  <!-- ============================================================ -->
-  <!-- PROXMOX VE — VM/LXC OPERATIONS (100815–100829)               -->
-  <!-- program_name: pvedaemon  (raw text: "<user> action VM/CT id") -->
-  <!-- ============================================================ -->
 
-  <!-- Rule ID: 100815 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- VM or LXC deleted (destructive) -->
+  <!-- ================================================================== -->
+  <!-- PVE GUEST (VM/CT) OPERATIONS - decoder pve-task / pve-guest-*       -->
+  <!-- ================================================================== -->
+
   <rule id="100815" level="10">
     <if_sid>87200</if_sid>
-    <regex type="pcre2">\bdelete (VM|CT) \d+</regex>
-    <description>Proxmox VE – VM/CT DELETED (pvedaemon) – destructive operation / data loss risk</description>
-    <group>proxmox,vm_operations,</group>
+    <field name="pve.phase">^starting$</field>
+    <field name="pve.task" type="pcre2">^(qm|vz)destroy$</field>
+    <description>Proxmox VE: guest $(pve.vmid) DESTROYED by $(pve.user)</description>
     <mitre><id>T1485</id></mitre>
+    <group>vm_operations,</group>
   </rule>
 
-  <!-- Rule ID: 100816 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- VM or LXC created (audit) -->
-  <rule id="100816" level="3">
+  <rule id="100816" level="5">
     <if_sid>87200</if_sid>
-    <regex type="pcre2">\bcreate (VM|CT) \d+</regex>
-    <description>Proxmox VE – VM/CT created (pvedaemon) – provisioning audit</description>
-    <group>proxmox,vm_operations,</group>
-    <options>no_full_log</options>
+    <field name="pve.phase">^starting$</field>
+    <field name="pve.task" type="pcre2">^(qm|vz)(create|clone|restore)$</field>
+    <description>Proxmox VE: guest $(pve.vmid) $(pve.task) by $(pve.user)</description>
+    <group>vm_operations,</group>
   </rule>
 
-  <!-- Rule ID: 100817 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- VM or LXC migrated to another node (data movement) -->
   <rule id="100817" level="7">
     <if_sid>87200</if_sid>
-    <regex type="pcre2">\bmigrate (VM|CT) \d+ to node</regex>
-    <description>Proxmox VE – VM/CT migrated to another node (pvedaemon) – data movement</description>
-    <group>proxmox,vm_operations,</group>
+    <field name="pve.phase">^starting$</field>
+    <field name="pve.task" type="pcre2">^(qm|vz)migrate$|^qmigrate$</field>
+    <description>Proxmox VE: guest $(pve.vmid) migration started by $(pve.user)</description>
     <mitre><id>T1041</id></mitre>
+    <group>vm_operations,</group>
   </rule>
 
-  <!-- Rule ID: 100818 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- VM snapshot deleted (inhibit recovery) -->
   <rule id="100818" level="7">
     <if_sid>87200</if_sid>
-    <regex type="pcre2">\bdelsnapshot (VM|CT) \d+</regex>
-    <description>Proxmox VE – Snapshot DELETED (delsnapshot, pvedaemon) – inhibit recovery</description>
-    <group>proxmox,vm_operations,</group>
+    <field name="pve.phase">^starting$</field>
+    <field name="pve.task" type="pcre2">^(qm|vz)(delsnapshot|rollback)$</field>
+    <description>Proxmox VE: snapshot $(pve.task) on guest $(pve.vmid) by $(pve.user)</description>
     <mitre><id>T1490</id></mitre>
+    <group>vm_operations,</group>
   </rule>
 
-  <!-- Rule ID: 100820 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- Parent: any VM/LXC lifecycle action (for mass-operation correlation) -->
+  <rule id="100819" level="8">
+    <if_sid>87200</if_sid>
+    <field name="pve.phase">^starting$</field>
+    <field name="pve.task" type="pcre2">^(imgdel|lvmremove|lvmthinremove|zfsremove|dirremove|wipedisk)$</field>
+    <description>Proxmox VE: storage/image deletion $(pve.task) ($(pve.vmid)) by $(pve.user)</description>
+    <mitre><id>T1485</id></mitre>
+    <group>vm_operations,storage,</group>
+  </rule>
+
   <rule id="100820" level="3">
     <if_sid>87200</if_sid>
-    <regex type="pcre2">\b(start|stop|delete|create|migrate|suspend|resume|snapshot|delsnapshot|rollback) (VM|CT) \d+</regex>
-    <description>Proxmox VE – VM/CT lifecycle operation (pvedaemon) – operation audit</description>
-    <group>proxmox,vm_operations,</group>
+    <field name="pve.phase">^starting$</field>
+    <field name="pve.task" type="pcre2">^(qm|vz)(start|stop|shutdown|reboot|reset|suspend|resume)$</field>
+    <description>Proxmox VE: guest $(pve.vmid) $(pve.task) by $(pve.user)</description>
+    <group>vm_operations,</group>
     <options>no_full_log</options>
   </rule>
 
-  <!-- Rule ID: 100821 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- Mass VM operations: 5+ actions in 60s. Correlates on parent + same agent. -->
-  <!-- (User is inside the <user@realm> message text, not a standard field, so we -->
-  <!-- correlate on the matched parent rule only, scoped per agent automatically.) -->
   <rule id="100821" level="9" frequency="5" timeframe="60">
     <if_matched_sid>100820</if_matched_sid>
-    <description>Proxmox VE – Mass VM operations: 5+ VM/CT actions in 60s on one node – possible mass destruction / scripted abuse. NOTE: correlates on parent 100820 per agent; operating user is in the raw message, not a field.</description>
-    <group>proxmox,vm_operations,</group>
-    <mitre><id>T1485</id></mitre>
+    <same_field>pve.user</same_field>
+    <description>Proxmox VE: 5+ guest power operations in 60 s by $(pve.user) - scripted / mass activity</description>
+    <mitre><id>T1489</id></mitre>
+    <group>vm_operations,</group>
   </rule>
 
-  <!-- Rule ID: 100825 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- VM backup task failure (vzdump). pvedaemon-emitted failures are handled
-       by 100828 below (they decode into the stock 87200 tree). -->
+  <!-- task ended with an error (e.g. "VM quit/powerdown failed - got timeout") -->
+  <rule id="100822" level="6">
+    <if_sid>87200</if_sid>
+    <field name="pve.phase">^end$</field>
+    <field name="pve.status" type="pcre2">^(?!OK$)(?!WARNINGS)</field>
+    <description>Proxmox VE: task $(pve.task) ($(pve.vmid)) FAILED: $(pve.status)</description>
+    <group>vm_operations,</group>
+  </rule>
+
+  <rule id="100840" level="3">
+    <if_sid>87200</if_sid>
+    <field name="pve.params">\.</field>
+    <description>Proxmox VE: $(pve.guesttype) $(pve.vmid) config updated by $(pve.actor): $(pve.params)</description>
+    <group>vm_operations,config_changed,</group>
+  </rule>
+
+  <!-- risky config: arbitrary QEMU args / hookscript (persistence), PCI/USB passthrough, protection off, disk removal -->
+  <rule id="100841" level="8">
+    <if_sid>100840</if_sid>
+    <field name="pve.params" type="pcre2">(?:^|\s)-(args|hookscript|hostpci\d*|usb\d*|protection 0)\b|-delete [^ ]*(scsi|virtio|ide|sata|efidisk|tpmstate)</field>
+    <description>Proxmox VE: RISKY config change on $(pve.guesttype) $(pve.vmid) by $(pve.actor): $(pve.params)</description>
+    <mitre><id>T1546</id><id>T1578</id></mitre>
+    <group>vm_operations,config_changed,</group>
+  </rule>
+
+
+  <!-- ================================================================== -->
+  <!-- PVE BACKUP (vzdump via pvescheduler / pvedaemon)                   -->
+  <!-- ================================================================== -->
+
+  <!-- verified in production logtest: this root rule wins over generic 1002 -->
   <rule id="100825" level="8">
     <program_name>pvescheduler|vzdump</program_name>
-    <regex type="pcre2">(?i)vzdump.*(failed|error)|backup.*failed</regex>
-    <description>Proxmox VE – Backup (vzdump) FAILED – backup integrity at risk</description>
-    <group>proxmox,backup,</group>
+    <regex type="pcre2">(?i)vzdump.*(failed|error)|backup.*failed|Backup job finished with errors</regex>
+    <description>Proxmox VE: backup FAILED (VM $(pve.vmid)): $(pve.status)</description>
     <mitre><id>T1490</id></mitre>
+    <group>backup,</group>
   </rule>
 
-  <!-- Rule ID: 100826 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- Consecutive vzdump failures: 2+ in an hour (correlates on parent, per agent) -->
   <rule id="100826" level="10" frequency="2" timeframe="3600">
     <if_matched_sid>100825</if_matched_sid>
-    <description>Proxmox VE – Consecutive vzdump failures (2+ in 1h) on one node – systematic backup failure / inhibit recovery. NOTE: correlates on parent 100825 per agent.</description>
-    <group>proxmox,backup,</group>
+    <same_location />
+    <description>Proxmox VE: repeated backup failures (2+ in 1 h)</description>
     <mitre><id>T1490</id></mitre>
+    <group>backup,</group>
   </rule>
 
-  <!-- Rule ID: 100827 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- VM backup success (informational) -->
   <rule id="100827" level="2">
     <program_name>pvescheduler|vzdump</program_name>
-    <regex type="pcre2">(?i)vzdump.*finished successfully|backup.*finished successfully</regex>
-    <description>Proxmox VE – Backup (vzdump) completed successfully</description>
-    <group>proxmox,backup,</group>
+    <regex type="pcre2">(?i)backup job finished successfully</regex>
+    <description>Proxmox VE: backup job finished successfully</description>
+    <group>backup,</group>
     <options>no_full_log</options>
   </rule>
 
-  <!-- Rule ID: 100828 | Env: Proxmox | Status: NEW (2026-07-09) -->
-  <!-- Backup failure logged by pvedaemon (e.g. manual GUI-started vzdump task).
-       Lives in the stock 87200 tree; NOT counted by the 100826 correlation. -->
   <rule id="100828" level="8">
     <if_sid>87200</if_sid>
-    <regex type="pcre2">(?i)vzdump.*(failed|error)|backup.*failed</regex>
-    <description>Proxmox VE – Backup (vzdump) FAILED (via pvedaemon task) – backup integrity at risk</description>
-    <group>proxmox,backup,</group>
+    <regex type="pcre2">(?i)vzdump.*(failed|error)|backup.*failed|proxmox-backup-client failed</regex>
+    <description>Proxmox VE: backup FAILED (pvedaemon task)</description>
     <mitre><id>T1490</id></mitre>
+    <group>backup,</group>
   </rule>
 
-  <!-- Rule ID: 100829 | Env: Proxmox | Status: NEW (2026-07-09) -->
-  <!-- Storage-unavailable error logged by pvedaemon (stock 87200 tree);
-       complements 100830 which covers pvestatd/pve-storage. -->
-  <rule id="100829" level="10">
+  <!-- wazuh-review 2026-09-29: pvedaemon provjerava stanje ili sadrzaj PBS storagea preko proxmox-backup-clienta (to NIJE backup):
+       "proxmox-backup-client failed: Error: datastore 'x' is unavailable: offline maintenance mode" -> 210 alerta 100828 u 1,5 h.
+       Najvise jedan alert na sat, kao 100829/100830. -->
+  <rule id="100833" level="7" ignore="3600">
+    <if_sid>100828</if_sid>
+    <match>proxmox-backup-client failed</match>
+    <description>Proxmox VE: PBS storage not accessible via proxmox-backup-client (status/listing, not a backup run)</description>
+    <group>storage,availability,</group>
+  </rule>
+
+
+  <!-- ================================================================== -->
+  <!-- PVE STORAGE                                                        -->
+  <!-- ================================================================== -->
+
+  <!-- "pbs2_sync: error fetching datastores - 500 Can't connect to 192.0.2.10:8007"
+       ~1,300/day on pm -> at most one alert per hour -->
+  <rule id="100830" level="7" ignore="3600">
+    <program_name>^pvestatd$</program_name>
+    <match>error fetching datastores</match>
+    <description>Proxmox VE: storage "$(pve.storage)" unreachable: $(pve.status)</description>
+    <group>storage,availability,</group>
+  </rule>
+
+  <rule id="100829" level="7" ignore="3600">
     <if_sid>87200</if_sid>
-    <regex type="pcre2">(?i)storage '.*' is not (available|online)|status update error.*storage</regex>
-    <description>Proxmox VE – Storage pool became UNAVAILABLE (via pvedaemon) – data availability impact</description>
-    <group>proxmox,storage,</group>
-    <mitre><id>T1485</id></mitre>
+    <match>error fetching datastores</match>
+    <description>Proxmox VE: storage "$(pve.storage)" unreachable (pvedaemon): $(pve.status)</description>
+    <group>storage,availability,</group>
   </rule>
 
-  <!-- ============================================================ -->
-  <!-- PROXMOX VE — STORAGE & INFRASTRUCTURE (100830–100849)        -->
-  <!-- program_name: pvestatd / pmxcfs / corosync                   -->
-  <!-- (pvedaemon-sourced storage errors: see 100829 above)         -->
-  <!-- ============================================================ -->
-
-  <!-- Rule ID: 100830 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- Storage pool became unavailable (pvedaemon path handled by 100829) -->
-  <rule id="100830" level="10">
-    <program_name>pvestatd|pve-storage</program_name>
-    <regex type="pcre2">(?i)storage '.*' is not (available|online)|status update error.*storage</regex>
-    <description>Proxmox VE – Storage pool became UNAVAILABLE – data availability impact</description>
-    <group>proxmox,storage,</group>
-    <mitre><id>T1485</id></mitre>
-  </rule>
-
-  <!-- Rule ID: 100831 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- Storage low disk space warning -->
   <rule id="100831" level="7">
-    <program_name>pvestatd</program_name>
+    <program_name>^pvestatd$</program_name>
     <regex type="pcre2">(?i)low disk space|disk space.*remaining|storage.*full</regex>
-    <description>Proxmox VE – Storage low disk space warning – capacity risk</description>
-    <group>proxmox,storage,</group>
-    <mitre><id>T1485</id></mitre>
+    <description>Proxmox VE: storage low on space</description>
+    <group>storage,</group>
   </rule>
 
-  <!-- Rule ID: 100832 | Env: Proxmox | Status: REWRITTEN -->
-  <!-- PVE node cluster event / node unreachable / quorum lost -->
+  <!-- not applicable today (pm and pm2 are standalone), kept for a future cluster -->
   <rule id="100832" level="9">
     <program_name>corosync|pmxcfs|pve-cluster</program_name>
     <regex type="pcre2">(?i)(node is unreachable|link.*down|lost connection to|quorum.*(lost|dissolved)|no quorum)</regex>
-    <description>Proxmox VE – Cluster event: node unreachable / quorum lost – infrastructure availability impact</description>
-    <group>proxmox,storage,</group>
-    <mitre><id>T1485</id></mitre>
+    <description>Proxmox VE: cluster event - node unreachable / quorum lost</description>
+    <group>storage,availability,</group>
   </rule>
 
-  <!-- ============================================================ -->
-  <!-- PROXMOX BACKUP SERVER (PBS) — AUTHENTICATION (100850–100859) -->
-  <!-- program_name: proxmox-backup-proxy                           -->
-  <!-- ============================================================ -->
 
-  <!-- Rule ID: 100850 | Env: PBS | Status: REWRITTEN -->
-  <!-- PBS authentication failure (single, parent for brute force) -->
+  <!-- ================================================================== -->
+  <!-- PROXMOX BACKUP SERVER (decoder pbs-backup-proxy, proxy + api)      -->
+  <!-- ================================================================== -->
+
+  <!-- PBS 3.x "... 401 Unauthorized: [client ...] authentication failed" (not claimed by 2501) -->
   <rule id="100850" level="5">
-    <program_name>proxmox-backup-proxy</program_name>
-    <regex type="pcre2">(?i)authentication failed|failed login attempt</regex>
-    <description>PBS – Authentication failure (proxmox-backup-proxy) – credential probing</description>
-    <group>pbs,authentication,</group>
+    <program_name>^proxmox-backup-proxy$|^proxmox-backup-api$</program_name>
+    <match>authentication failed</match>
+    <description>PBS: authentication failed from $(srcip) ($(url))</description>
     <mitre><id>T1110</id></mitre>
+    <group>authentication_failed,pbs,</group>
   </rule>
 
-  <!-- Rule ID: 100851 | Env: PBS | Status: REWRITTEN -->
-  <!-- PBS brute force: 5+ failures in 120s (correlates on parent, per agent) -->
+  <!-- PBS 4.x "authentication failure; rhost=[...] [user=..] msg=..." is claimed by stock 2501 -->
+  <rule id="100852" level="5">
+    <if_sid>2501</if_sid>
+    <program_name>^proxmox-backup-proxy$|^proxmox-backup-api$</program_name>
+    <match>authentication failure; rhost=</match>
+    <description>PBS: login failed for $(dstuser) from $(srcip): $(pve.status)</description>
+    <mitre><id>T1110</id></mitre>
+    <group>authentication_failed,pbs,</group>
+  </rule>
+
+  <!-- expired ticket (browser tab / stale session) - audit only -->
+  <rule id="100854" level="3">
+    <if_sid>100852</if_sid>
+    <match>invalid ticket - expired</match>
+    <description>PBS: expired session ticket from $(srcip)</description>
+    <group>authentication_failed,pbs,</group>
+  </rule>
+
   <rule id="100851" level="10" frequency="5" timeframe="120">
-    <if_matched_sid>100850</if_matched_sid>
-    <description>PBS – Brute force detected: 5+ auth failures in 120s – sustained credential attack. NOTE: correlates on parent 100850 per agent; source IP is in the raw message, not a standard field.</description>
-    <group>pbs,authentication,</group>
+    <if_matched_sid>100852</if_matched_sid>
+    <same_srcip />
+    <description>PBS: brute force - 5+ failed logins in 2 min from $(srcip)</description>
     <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,pbs,</group>
   </rule>
 
-  <!-- Rule ID: 100855 | Env: PBS | Status: REWRITTEN -->
-  <!-- PBS successful auth (parent for success-after-failure / external login) -->
-  <rule id="100855" level="3">
-    <program_name>proxmox-backup-proxy</program_name>
-    <match>authentication successful</match>
-    <description>PBS – Successful authentication (proxmox-backup-proxy)</description>
-    <group>pbs,authentication,</group>
-    <options>no_full_log</options>
+  <rule id="100853" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>100850</if_matched_sid>
+    <same_srcip />
+    <description>PBS: 5+ API authentication failures in 2 min from $(srcip)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,pbs,</group>
   </rule>
 
-  <!-- Rule ID: 100856 | Env: PBS | Status: REWRITTEN -->
-  <!-- PBS login success after prior failures -->
-  <rule id="100856" level="12">
-    <if_sid>100855</if_sid>
-    <if_matched_sid>100851</if_matched_sid>
-    <description>PBS – Login SUCCEEDED after prior brute force – likely compromised credentials. NOTE: correlates on prior 100851 firing on the same agent.</description>
-    <group>pbs,authentication,</group>
-    <mitre><id>T1078</id></mitre>
-  </rule>
-
-  <!-- Rule ID: 100857 | Env: PBS | Status: REWRITTEN -->
-  <!-- PBS failed login attempt from an external (non-RFC1918) IP -->
-  <!-- "failed login attempt from <ip>" includes the IP in the raw text; match on it. -->
-  <rule id="100857" level="9">
-    <program_name>proxmox-backup-proxy</program_name>
-    <regex type="pcre2">failed login attempt from (?!(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|127\.|169\.254\.))\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}</regex>
-    <description>PBS – Failed login attempt from EXTERNAL (non-RFC1918) IP – unexpected remote backup-server access attempt</description>
-    <group>pbs,authentication,</group>
-    <mitre><id>T1078.004</id></mitre>
-  </rule>
-
-  <!-- ============================================================ -->
-  <!-- PROXMOX BACKUP SERVER (PBS) — BACKUP OPERATIONS (100860–100899) -->
-  <!-- program_name: proxmox-backup-proxy                           -->
-  <!-- ============================================================ -->
-
-  <!-- Rule ID: 100860 | Env: PBS | Status: REWRITTEN -->
-  <!-- Backup job failed (single, parent for consecutive-failure correlation) -->
-  <rule id="100860" level="8">
-    <program_name>proxmox-backup-proxy</program_name>
-    <match>backup failed: </match>
-    <description>PBS – Backup FAILED – backup integrity at risk</description>
-    <group>pbs,backup,</group>
+  <!-- 14,000+ "unable to open chunk store" per day when the NAS mount is gone -> one alert per hour -->
+  <rule id="100867" level="10" ignore="3600">
+    <program_name>^proxmox-backup-proxy$|^proxmox-backup-api$</program_name>
+    <regex type="pcre2">(?i)unable to open chunk store|datastore '.*' is unavailable|datastore.*not available</regex>
+    <description>PBS: datastore UNAVAILABLE - backups and restores fail</description>
     <mitre><id>T1490</id></mitre>
+    <group>storage,availability,pbs,</group>
   </rule>
 
-  <!-- Rule ID: 100861 | Env: PBS | Status: REWRITTEN -->
-  <!-- Consecutive backup failures: 3+ in an hour (correlates on parent, per agent) -->
-  <rule id="100861" level="10" frequency="3" timeframe="3600">
-    <if_matched_sid>100860</if_matched_sid>
-    <description>PBS – Consecutive backup failures (3+ in 1h) – systematic backup failure / inhibit recovery. NOTE: correlates on parent 100860 per agent; store/VM is in the raw message, not a field.</description>
-    <group>pbs,backup,</group>
+  <rule id="100868" level="8" ignore="3600">
+    <program_name>^proxmox-backup-proxy$|^proxmox-backup-api$</program_name>
+    <match>unable to start datastore </match>
+    <description>PBS: $(pbs.jobtype) job $(pbs.jobid) could not start: $(pve.status)</description>
     <mitre><id>T1490</id></mitre>
+    <group>backup,pbs,</group>
   </rule>
 
-  <!-- Rule ID: 100862 | Env: PBS | Status: REWRITTEN -->
-  <!-- Backup success (informational, low noise) -->
-  <rule id="100862" level="2">
-    <program_name>proxmox-backup-proxy</program_name>
-    <match>backup finished successfully</match>
-    <description>PBS – Backup finished successfully</description>
-    <group>pbs,backup,</group>
-    <options>no_full_log</options>
-  </rule>
-
-  <!-- Rule ID: 100865 | Env: PBS | Status: REWRITTEN -->
-  <!-- Prune removed an unusually large number of snapshots (>=10) -->
-  <rule id="100865" level="6">
-    <program_name>proxmox-backup-proxy</program_name>
-    <regex type="pcre2">prune job finished:.*removed=[1-9]\d+ snapshots</regex>
-    <description>PBS – Prune removed an unusually large number of snapshots (10+) – possible inhibit recovery</description>
-    <group>pbs,backup,</group>
+  <!-- "error during snapshot file listing: 'unable to load blob '".../index.json.blob"' - No such file or directory'" -->
+  <rule id="100869" level="7" ignore="3600">
+    <program_name>^proxmox-backup-proxy$|^proxmox-backup-api$</program_name>
+    <match>error during snapshot file listing|unable to load blob</match>
+    <description>PBS: datastore content error (missing/unreadable snapshot files) - verify the datastore</description>
     <mitre><id>T1490</id></mitre>
+    <group>storage,pbs,</group>
   </rule>
 
-  <!-- Rule ID: 100866 | Env: PBS | Status: REWRITTEN -->
-  <!-- Garbage collection failure -->
-  <rule id="100866" level="7">
-    <program_name>proxmox-backup-proxy</program_name>
-    <regex type="pcre2">(?i)garbage collection (failed|error)</regex>
-    <description>PBS – Garbage collection FAILED – storage maintenance issue</description>
-    <group>pbs,storage,</group>
-    <mitre><id>T1485</id></mitre>
+  <!-- wazuh-review 2026-09-29: neuspjeli PBS task/job (sync, verify, prune, GC, backup) - decoder pbs-task-error.
+       Prije ovoga neuspjeli pull (28.9. 00:38) i mrtvi push na drugoj lokaciji (svake noci u 00:00) nisu davali nikakav alert. -->
+  <rule id="100870" level="8">
+    <program_name>^proxmox-backup-proxy$|^proxmox-backup-api$|^proxmox-backup-manager$</program_name>
+    <match>TASK ERROR: </match>
+    <description>PBS: task FAILED - $(pve.status)</description>
+    <mitre><id>T1490</id></mitre>
+    <group>backup,pbs,</group>
   </rule>
 
-  <!-- Rule ID: 100867 | Env: PBS | Status: REWRITTEN -->
-  <!-- Datastore unavailable -->
-  <rule id="100867" level="10">
-    <program_name>proxmox-backup-proxy</program_name>
-    <regex type="pcre2">(?i)datastore '.*' is unavailable|datastore.*not available</regex>
-    <description>PBS – Datastore is UNAVAILABLE – backup data availability impact</description>
-    <group>pbs,storage,</group>
-    <mitre><id>T1485</id></mitre>
+  <rule id="100871" level="10" frequency="3" timeframe="86400">
+    <if_matched_sid>100870</if_matched_sid>
+    <same_location />
+    <description>PBS: 3+ failed tasks in 24 h on the same server - backups or copies are not working</description>
+    <mitre><id>T1490</id></mitre>
+    <group>backup,pbs,</group>
+  </rule>
+
+  <!-- backup snapshot finished (client log uploaded) - audit, one per guest per backup run -->
+  <rule id="100862" level="3">
+    <program_name>^proxmox-backup-proxy$|^proxmox-backup-api$</program_name>
+    <match>Upload backup log to datastore</match>
+    <description>PBS: backup of $(pbs.guesttype)/$(pve.vmid) completed ($(pbs.datastore))</description>
+    <group>backup,pbs,</group>
   </rule>
 
 </group>
-<!--
-  COVERAGE SUMMARY (REALIGNED — DEFAULT DECODERS ONLY, NO CUSTOM PROXMOX/PBS DECODER):
-  IMPLEMENTED via program_name + match/regex on raw log text:
-  - PVE auth failure single + brute-force (correlate on parent) + success-after-failure
-    + root@pam login + pveum user-create/admin-add + pveum user-delete
-  - PVE VM/CT lifecycle: delete, create, migrate, delsnapshot; mass-ops correlation (per agent)
-  - PVE backup (vzdump) failure single + consecutive-failure correlation + success (info)
-  - PVE storage unavailable, low disk, cluster/quorum loss
-  - PBS auth failure single + brute force (per agent) + success-after-failure + external-IP login attempt
-  - PBS backup failure single + 3+/1h consecutive correlation + success (info)
-    + oversized prune + GC failure + datastore unavailable
-
-  KEY REALIGNMENT CHANGES:
-  - Removed ALL data.pve.* and data.pbs.* fields (no decoder produces them).
-  - <decoded_as>proxmox-auth/proxmox-backup/proxmox-scheduler</decoded_as> removed
-    (those decoders do not exist) and replaced with <program_name> + <match>/<regex>.
-  - Correlations keyed on user/store/IP now correlate on the matched parent rule per
-    agent, because those values live in the raw message text and are not extracted
-    into Wazuh-standard fields. Documented inline per rule.
-  - 2026-07-09: all pvedaemon-sourced rules rechained under stock 87200/87201/87203
-    (+2501 for pveproxy) — as root rules they were shadowed by stock and never fired.
-    Added 100828/100829 (pvedaemon-path backup-fail / storage-unavailable variants).
-    Fixed 100807 root@pam match to include the quotes PVE puts around the username.
--->

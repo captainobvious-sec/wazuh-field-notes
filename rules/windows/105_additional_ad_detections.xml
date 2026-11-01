@@ -160,7 +160,9 @@
     <if_sid>100206</if_sid>
     <field name="win.system.eventID">^4624$</field>
     <field name="win.eventdata.logonType">^9$</field>
-    <field name="win.eventdata.logonProcessName" type="pcre2">(?i)^seclogo$</field>
+    <!-- FIX 2026-09-24 (REVIEW.md F-27): tolerate trailing padding (LogonProcessName
+         values such as "Advapi  " are space-padded). -->
+    <field name="win.eventdata.logonProcessName" type="pcre2">(?i)^seclogo\s*$</field>
     <field name="win.eventdata.authenticationPackageName" type="pcre2">(?i)^Negotiate$</field>
     <!-- ROUTING 2026-07-08: demoted to digest. `runas /netonly` produces the
          identical LogonType-9 + seclogo + Negotiate signature and is standard

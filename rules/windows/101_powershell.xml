@@ -1,5 +1,13 @@
 <group name="windows,powershell,ad_recon,">
 
+  <!-- FIX 2026-09-24 (REVIEW.md F-01): every 4104 rule below chains
+       <if_sid>91802,91807,91812</if_sid>. Stock 0915 rules 91807 (Get-ItemProperty)
+       and 91812 (Remove-Item -Path) are LEVEL-0 siblings under 91802: level-0 siblings
+       are evaluated first and end sibling evaluation, so any script block containing
+       either string never reached these rules (incl. Tier-1 100431/100442/100462) -
+       a trivial evasion. As children of 91807/91812 as well, these rules are evaluated
+       after the stock L0 rule matches (a child overrides its parent). -->
+
   <!-- ============================================================
        SECTION 1 — Basic System Reconnaissance
        These are the first commands attackers run after initial access
@@ -7,7 +15,7 @@
 
   <!-- whoami variants - identity discovery -->
   <rule id="100400" level="4">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)whoami</field>
     <options>no_full_log</options>
@@ -20,7 +28,7 @@
 
   <!-- System info gathering -->
   <rule id="100401" level="4">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)systeminfo|Get-ComputerInfo|Get-WmiObject\s+Win32_ComputerSystem|Get-CimInstance\s+Win32_ComputerSystem</field>
     <options>no_full_log</options>
@@ -33,7 +41,7 @@
 
   <!-- Network configuration discovery -->
   <rule id="100402" level="4">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)ipconfig|Get-NetIPAddress|Get-NetIPConfiguration|Get-NetAdapter</field>
     <options>no_full_log</options>
@@ -46,7 +54,7 @@
 
   <!-- Running process enumeration -->
   <rule id="100403" level="4">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-Process|tasklist|Get-WmiObject\s+Win32_Process|Get-CimInstance\s+Win32_Process</field>
     <options>no_full_log</options>
@@ -59,7 +67,7 @@
 
   <!-- Installed software enumeration -->
   <rule id="100404" level="4">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-WmiObject\s+Win32_Product|Get-ItemProperty\s+HKLM.*Uninstall|winrm enumerate</field>
     <options>no_full_log</options>
@@ -72,7 +80,7 @@
 
   <!-- Local user and group enumeration -->
   <rule id="100405" level="4">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-LocalUser|Get-LocalGroup|Get-LocalGroupMember|net localgroup|net user</field>
     <options>no_full_log</options>
@@ -85,7 +93,7 @@
 
   <!-- Open ports and network connections -->
   <rule id="100406" level="4">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-NetTCPConnection|Get-NetUDPEndpoint|netstat</field>
     <options>no_full_log</options>
@@ -98,20 +106,22 @@
 
   <!-- Scheduled tasks enumeration -->
   <rule id="100407" level="4">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ScheduledTask|schtasks</field>
+    <!-- FIX 2026-09-30: skip the generated CDXML proxy code of the ScheduledTasks module (see 100450) -->
+    <field name="win.eventdata.scriptBlockText" negate="yes" type="pcre2">\$__cmdletization_</field>
     <options>no_full_log</options>
     <description>PS Recon: Scheduled task enumeration on $(win.system.computer)</description>
     <mitre>
-      <id>T1053.005</id>
+      <id>T1082</id>
     </mitre>
     <group>recon,discovery,</group>
   </rule>
 
   <!-- Services enumeration -->
   <rule id="100408" level="4">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-Service|sc query|Get-WmiObject\s+Win32_Service|Get-CimInstance\s+Win32_Service</field>
     <options>no_full_log</options>
@@ -144,7 +154,7 @@
 
   <!-- AD user enumeration -->
   <rule id="100410" level="10">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADUser|Get-ADObject|\[adsisearcher\]</field>
     <options>no_full_log</options>
@@ -157,7 +167,7 @@
 
   <!-- AD group enumeration -->
   <rule id="100411" level="10">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADGroup|Get-ADGroupMember|Get-ADPrincipalGroupMembership</field>
     <options>no_full_log</options>
@@ -170,7 +180,7 @@
 
   <!-- AD computer enumeration -->
   <rule id="100412" level="10">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADComputer|Get-ADDomainController|Get-ADDomain|Get-ADForest</field>
     <options>no_full_log</options>
@@ -183,7 +193,7 @@
 
   <!-- AD trust enumeration -->
   <rule id="100413" level="10">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADTrust|nltest /domain_trusts|Get-NetDomainTrust</field>
     <options>no_full_log</options>
@@ -196,7 +206,7 @@
 
   <!-- SPN / Kerberoastable account enumeration -->
   <rule id="100414" level="12">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ADUser.*ServicePrincipalName|setspn|KerberosRequestorSecurityToken|Request-SPNTicket</field>
     <options>no_full_log</options>
@@ -210,7 +220,7 @@
 
   <!-- GPO and OU enumeration -->
   <rule id="100415" level="10">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-GPO|Get-ADOU|Get-ADOrganizationalUnit|Get-GPPermission|gpresult</field>
     <options>no_full_log</options>
@@ -227,9 +237,11 @@
 
   <!-- Network share enumeration -->
   <rule id="100420" level="10">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-SmbShare|Get-WmiObject\s+Win32_Share|net share|net view</field>
+    <!-- FIX 2026-09-30: skip the generated CDXML proxy code of the SmbShare module (see 100450) -->
+    <field name="win.eventdata.scriptBlockText" negate="yes" type="pcre2">\$__cmdletization_</field>
     <options>no_full_log</options>
     <description>PS Recon: Network share enumeration on $(win.system.computer)</description>
     <mitre>
@@ -240,7 +252,7 @@
 
   <!-- Port scanning -->
   <rule id="100421" level="12">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Invoke-Portscan|1\.\.1024|foreach.*TcpClient</field>
     <options>no_full_log</options>
@@ -254,7 +266,7 @@
 
   <!-- DNS reconnaissance -->
   <rule id="100422" level="8">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Resolve-DnsName|nslookup|\[System\.Net\.Dns\]</field>
     <options>no_full_log</options>
@@ -271,10 +283,12 @@
 
   <!-- Registry credential hunting -->
   <rule id="100430" level="13">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)HKLM.*password|HKCU.*password|reg query.*password|Get-ItemProperty.*password</field>
     <options>no_full_log</options>
+    <!-- FIX 2026-09-24 (REVIEW.md F-13): Tier-2 per the tier model - digest, not e-mail. -->
+    <options>no_email_alert</options>
     <description>PS Attack: Registry credential search on $(win.system.computer)</description>
     <mitre>
       <id>T1552.002</id>
@@ -284,9 +298,11 @@
 
   <!-- LSASS access attempts -->
   <rule id="100431" level="14">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
-    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)lsass|sekurlsa|Out-Minidump|MiniDumpWriteDump|procdump</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)sekurlsa|Invoke-Mimikatz|Out-Minidump|MiniDumpWriteDump|nanodump|SharpDump|Dumpert|comsvcs(?:\.dll)?[\s,"']+#?\s*(?:24|MiniDump)|procdump(?:64)?(?:\.exe)?\s.*(?:lsass|-ma\s+\d)|lsass.{0,200}\.dmp</field>
+    <!-- FIX 2026-09-24 (REVIEW.md F-19): a bare "lsass" matched any script mentioning LSASS
+         (RunAsPPL checks, monitoring) on this Tier-1 rule; now requires a dump primitive. -->
     <options>no_full_log</options>
     <description>PS Attack: LSASS memory access / credential dump attempt on $(win.system.computer)</description>
     <mitre>
@@ -299,11 +315,14 @@
        NOTE (2026-07-08): email demoted to digest here because the `vssadmin`
        alternation fires on every backup job (FP). The unambiguous half
        (ntds.dit / reg save sam|system) is split into Tier-1 child 100607 in
-       107_alert_tuning.xml, which keeps emailing. -->
+       107-alert_tuning_windows.xml, which keeps emailing. -->
   <rule id="100432" level="14">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
-    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)ntds.dit|sam.*system|reg save.*sam|reg save.*system|vssadmin</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)ntds\.dit|reg(?:\.exe)?\s+save\s+\S*(?:sam|system|security)\b|ntdsutil|vssadmin(?:\.exe)?\s+create\s+shadow|HarddiskVolumeShadowCopy</field>
+    <!-- FIX 2026-09-24 (REVIEW.md F-19): dropped the FP-prone "sam.*system" and bare
+         "vssadmin" (every backup job); added ntdsutil so the Tier-1 child 100607
+         (ntdsutil ... ifm) is reachable. -->
     <options>no_full_log</options>
     <options>no_email_alert</options>
     <description>PS Attack: SAM/NTDS credential dump attempt on $(win.system.computer)</description>
@@ -315,7 +334,7 @@
 
   <!-- Credential files search -->
   <rule id="100433" level="12">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Get-ChildItem.*password|Select-String.*password|findstr.*password|Get-Content.*unattend</field>
     <options>no_full_log</options>
@@ -335,9 +354,9 @@
        NOTE (2026-07-08): email demoted (exclusion/preference management is
        routine endpoint admin). Hard-kill patterns (DisableRealtimeMonitoring
        / tamper-protection off) are split into Tier-1 child 100605 in
-       107_alert_tuning.xml. -->
+       107-alert_tuning_windows.xml. -->
   <rule id="100440" level="14">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Set-MpPreference|Disable-WindowsOptionalFeature|Add-MpPreference.*ExclusionPath|Set-MpPreference.*DisableRealtimeMonitoring</field>
     <options>no_full_log</options>
@@ -353,9 +372,10 @@
        NOTE (2026-07-08): email demoted. A SUCCESSFUL clear raises 1102, which
        fires the Tier-1 rule 100352; the PS attempt alone is digest material. -->
   <rule id="100441" level="14">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
-    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Clear-EventLog|wevtutil.*cl|Remove-EventLog|Limit-EventLog</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Clear-EventLog|wevtutil(?:\.exe)?\s+(?:cl|clear-log)\b|Remove-EventLog|Limit-EventLog|GlobalSession\.ClearLog</field>
+    <!-- FIX 2026-09-24 (REVIEW.md F-19): "wevtutil.*cl" matched "include", "class", ... -->
     <options>no_full_log</options>
     <options>no_email_alert</options>
     <description>PS Attack: Event log clearing on $(win.system.computer)</description>
@@ -367,7 +387,7 @@
 
   <!-- AMSI bypass attempts -->
   <rule id="100442" level="15">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)amsiInitFailed|AmsiScanBuffer|amsi.dll|Bypass-AMSI|amsiContext</field>
     <options>no_full_log</options>
@@ -380,7 +400,7 @@
 
   <!-- Execution policy bypass -->
   <rule id="100443" level="10">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Set-ExecutionPolicy Bypass|Set-ExecutionPolicy Unrestricted|ExecutionPolicy Bypass</field>
     <options>no_full_log</options>
@@ -397,9 +417,15 @@
 
   <!-- Scheduled task creation -->
   <rule id="100450" level="12">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Register-ScheduledTask|New-ScheduledTask|schtasks.*create</field>
+    <!-- FIX 2026-09-30 (live test, REVIEW.md 11.10): loading a CDXML module (ScheduledTasks,
+         SmbShare, ...) logs its generated proxy code as 4104 blocks that contain every
+         cmdlet name and "$__cmdletization_" variables; one ScheduledTasks load fired this
+         rule 8 times at L12. Such blocks are skipped. Evasion cost: a script that carries
+         that string also skips 100450, but the task itself is still caught by 4698 -> 100357. -->
+    <field name="win.eventdata.scriptBlockText" negate="yes" type="pcre2">\$__cmdletization_</field>
     <options>no_full_log</options>
     <options>no_email_alert</options>
     <description>PS Persistence: Scheduled task creation on $(win.system.computer)</description>
@@ -411,9 +437,14 @@
 
   <!-- Registry run key persistence -->
   <rule id="100451" level="12">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
-    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)HKLM.*Run|HKCU.*Run|New-ItemProperty.*CurrentVersion.*Run|Set-ItemProperty.*CurrentVersion.*Run</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)[\\/]+CurrentVersion[\\/]+Run(?:Once|OnceEx|Services|ServicesOnce)?\b</field>
+    <!-- FIX 2026-09-24 (REVIEW.md F-19): "HKLM.*Run" matched "Runtime", "RunAs", ...
+         FIX 2026-09-30 (live test, REVIEW.md 11.9): eventchannel fields arrive with every
+         backslash DOUBLED ("CurrentVersion\\Run" in the value), so the single "\\" between
+         the two words never matched and the rule could not fire. [\\/]+ accepts one or
+         more backslashes, and forward slashes (PowerShell accepts HKLM:/Software/...). -->
     <options>no_full_log</options>
     <options>no_email_alert</options>
     <description>PS Persistence: Registry run key modification on $(win.system.computer)</description>
@@ -425,7 +456,7 @@
 
   <!-- WMI event subscription persistence -->
   <rule id="100452" level="13">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)New-CimInstance.*__EventFilter|New-CimInstance.*__EventConsumer|New-CimInstance.*__FilterToConsumerBinding|Set-WmiInstance.*__EventFilter</field>
     <options>no_full_log</options>
@@ -443,7 +474,7 @@
 
   <!-- Remote execution via WMI -->
   <rule id="100460" level="12">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Invoke-WmiMethod|Get-WmiObject.*-ComputerName|Invoke-CimMethod.*-ComputerName</field>
     <options>no_full_log</options>
@@ -457,7 +488,7 @@
 
   <!-- Remote execution via PSRemoting -->
   <rule id="100461" level="12">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Invoke-Command.*-ComputerName|New-PSSession|Enter-PSSession|New-CimSession.*-ComputerName</field>
     <options>no_full_log</options>
@@ -471,7 +502,7 @@
 
   <!-- Pass-the-hash / token manipulation -->
   <rule id="100462" level="14">
-    <if_sid>91802</if_sid>
+    <if_sid>91802,91807,91812</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)Invoke-TokenManipulation|Invoke-RunAs|Add-ObjectAcl|Invoke-ACLScanner</field>
     <options>no_full_log</options>
@@ -489,9 +520,9 @@
      IDs 100470-100499
 
      CONSOLIDATED 2026-07-08: these 4103 module-logging rules were merged INTO
-     this file, so there is a single PowerShell rule file. They previously lived
-     in a separate "106" file (hence the gap in the 100-108 numbering); the IDs
-     100470-100485 are now declared exactly once, here. 4104 script-block rules are
+     this file (per operator preference for a single PowerShell rule file). The
+     former separate file 106-ps_module_logging_windows.xml has been emptied so
+     the IDs 100470-100485 are declared exactly once. 4104 script-block rules are
      above (100400-100462); 4103 cmdlet/pipeline rules are below and carry the
      invoking user SID ($(win.system.securityUserID)).
 
@@ -600,7 +631,7 @@
     <field name="win.eventdata.payload" type="pcre2">(?i)(Set-MpPreference\s+.*-Disable|Add-MpPreference\s+.*-ExclusionPath|Set-MpPreference\s+.*-ExclusionProcess|amsiInitFailed|AmsiUtils|System\.Management\.Automation\.AmsiUtils|Disable-WindowsOptionalFeature.*Defender)</field>
     <!-- ROUTING 2026-07-08: demoted to digest; exclusion/preference management is
          routine endpoint admin. Hard-kill patterns are split into Tier-1 child
-         100606 in 107_alert_tuning.xml. -->
+         100606 in 107-alert_tuning_windows.xml. -->
     <options>no_full_log</options>
     <options>no_email_alert</options>
     <description>PS Module Evasion: Defender/AMSI tampering by SID $(win.system.securityUserID) on $(win.system.computer)</description>
