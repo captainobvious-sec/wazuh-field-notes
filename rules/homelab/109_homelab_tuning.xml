@@ -80,4 +80,13 @@
     <group>availability,log_pipeline,</group>
   </rule>
 
+  <!-- backup timeri na Proxmox/PBS hostovima (wazuh-review 2026-10-07): pad -> L10 -> Telegram.
+       journald: "unas-files-backup.service: Failed with result 'exit-code'." -->
+  <rule id="100973" level="10">
+    <if_sid>40700</if_sid>
+    <regex type="pcre2">(host-config-backup|unas-files-backup)\.service: Failed with result</regex>
+    <description>Homelab backup job failed (systemd) - check the unit journal</description>
+    <group>backup,availability,</group>
+  </rule>
+
 </group>
