@@ -92,10 +92,19 @@ jobs:
           docker cp stage/rules/.    "$cid:/var/ossec/etc/rules/"
           docker cp stage/decoders/. "$cid:/var/ossec/etc/decoders/"
           docker exec "$cid" chown -R wazuh:wazuh /var/ossec/etc/rules /var/ossec/etc/decoders
-          docker exec "$cid" chmod 660 -R /var/ossec/etc/rules /var/ossec/etc/decoders
+          # directories need the execute bit, otherwise analysisd cannot open any file in them
+          docker exec "$cid" find /var/ossec/etc/rules /var/ossec/etc/decoders -type d -exec chmod 770 {} +
+          docker exec "$cid" find /var/ossec/etc/rules /var/ossec/etc/decoders -type f -exec chmod 660 {} +
 
           echo "--- validating"
-          docker exec -w /var/ossec "$cid" /var/ossec/bin/wazuh-analysisd -t
+          docker exec -w /var/ossec "$cid" /var/ossec/bin/wazuh-analysisd -t 2>&1 | tee analysisd.log
+          # analysisd -t exits 0 even when it cannot open a file or ignores a rule
+          # (warnings 1103/7615/7617/7619), so any WARNING/ERROR/CRITICAL line fails the job.
+          # The container cannot raise its file-descriptor limit; that one line is expected.
+          if grep -E 'WARNING|ERROR|CRITICAL' analysisd.log | grep -v 'Could not set resource limit'; then
+            echo "::error::wazuh-analysisd reported problems (see above)"
+            exit 1
+          fi
 
       - name: Confirm experimental/ is still rejected
         # experimental/windows_normalize.xml attaches child decoders to the
