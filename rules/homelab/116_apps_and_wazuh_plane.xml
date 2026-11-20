@@ -64,7 +64,7 @@
   <!-- 116305: remoted rejected an agent message: wrong key, corrupt payload, bad checksum -->
   <rule id="116305" level="6">
     <decoded_as>wazuh-manager-log</decoded_as>
-    <field name="wz.errcode">^(?:1403|1404|1406)$</field>
+    <field name="wz.errcode" type="pcre2">^(?:1403|1404|1406)$</field>
     <description>Wazuh remoted: message from agent '$(wz.agent)' at $(srcip) rejected (error $(wz.errcode)) - wrong key or corrupt payload</description>
     <mitre><id>T1550</id></mitre>
     <group>wazuh_agent_auth,</group>
@@ -94,7 +94,7 @@
   <!-- 116310: a file was renamed to a known ransomware extension.
        Backup chunk stores rename temp files constantly, so the match is on the extension only. -->
   <rule id="116310" level="12">
-    <decoded_as>smbd_audit</decoded_as>
+    <if_sid>13100</if_sid>
     <field name="smb.op">^renameat$</field>
     <field name="smb.result">^ok$</field>
     <field name="smb.args" type="pcre2">(?i)\.(?:locked|lockbit|encrypted|crypt\d*|crypted|enc|wncry|wcry|akira|royal|blacksuit|hive|basta|medusa|cerber|ryk|conti)(?:\||$)</field>
@@ -105,7 +105,7 @@
 
   <!-- 116311: a ransom-note style file was created -->
   <rule id="116311" level="12">
-    <decoded_as>smbd_audit</decoded_as>
+    <if_sid>13100</if_sid>
     <field name="smb.op">^openat$</field>
     <field name="smb.args" type="pcre2">(?i)(?:README_?(?:TO_)?(?:DECRYPT|RESTORE)|HOW_?TO_?(?:DECRYPT|RECOVER)|DECRYPT[_ -]?(?:FILES|INSTRUCTIONS)|RESTORE[_ -]?(?:MY[_ -]?)?FILES|RECOVER[_ -]?(?:MY[_ -]?)?FILES)[^/|]*\.(?:txt|html?|hta)</field>
     <description>SMB: ransom-note style file written by $(srcuser) from $(srcip) on share $(smb.share)</description>
@@ -146,7 +146,9 @@
   </rule>
 
   <!-- qBittorrent WebUI -->
+  <!-- chained on stock 2501 (generic "authentication failure"): that rule claims the line first -->
   <rule id="116325" level="5">
+    <if_sid>2501</if_sid>
     <decoded_as>qbittorrent</decoded_as>
     <match>login failure. Reason: invalid credentials</match>
     <description>qBittorrent: WebUI login failure for $(srcuser) from $(srcip) (attempt $(qbt.attempts))</description>

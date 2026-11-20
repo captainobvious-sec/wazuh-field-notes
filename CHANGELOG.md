@@ -19,7 +19,7 @@
   UniFi intrusion indicators (116100-116101), Windows/AD exploit techniques (116200-116211),
   PBS API access-log rules (100880-100883), and app-login, Samba-ransomware and Wazuh
   enrolment rules (116300-116336) with new decoders (`decoders/homelab/`,
-  `decoders/proxmox/pbs_access.xml`) and ingest snippets. **Not yet run against live logs.**
+  `decoders/proxmox/pbs_access.xml`) and ingest snippets. Validated with `analysisd -t` and 50 synthetic `wazuh-logtest` events on a 4.14.3 manager; Windows/FIM parent chains and frequency rules not exercised (see the doc).
 - `rules/homelab/`: `109_homelab_tuning.xml` (rootcheck/FIM/sudo noise, kernel disk errors,
   rsyslog relay log freshness) and `local_rules.xml` (Cloudflare Access, local rules).
 
@@ -27,6 +27,7 @@
 - `rules/linux/115_alert_tuning.xml` (comments only, no active rule).
 
 ### Added (CI)
+- `lint_ruleset.py` rejects `(?:...)`/`(?i)` in a rule option that lacks `type="pcre2"` (analysisd refuses the file).
 - **CI (`.github/workflows/validate.yml`)** — every push, PR and a weekly schedule run
   two layers: a structural lint that needs no Wazuh install, and `wazuh-analysisd -t`
   against a real manager container, pinned to 4.14.3 (must pass) plus `latest` as an

@@ -13,7 +13,7 @@
   <!-- 100880: a backup group or snapshot was deleted through the API -->
   <rule id="100880" level="10">
     <decoded_as>pbs-access</decoded_as>
-    <action>^DELETE$</action>
+    <action type="pcre2">^DELETE$</action>
     <url type="pcre2">/admin/datastore/[^/]+/(?:groups|snapshots)(?:\?|$)</url>
     <status>^200$</status>
     <description>PBS: backup group/snapshot deleted via API by $(dstuser) from $(srcip)</description>
@@ -33,7 +33,7 @@
   <!-- 100882: prune / garbage collection started by hand through the API -->
   <rule id="100882" level="8">
     <decoded_as>pbs-access</decoded_as>
-    <action>^POST$</action>
+    <action type="pcre2">^POST$</action>
     <url type="pcre2">/admin/datastore/[^/]+/(?:prune|prune-datastore|gc)(?:\?|$)</url>
     <status>^200$</status>
     <description>PBS: prune/garbage collection triggered via API by $(dstuser) from $(srcip)</description>
@@ -44,7 +44,7 @@
   <!-- 100883: ACL, user, role or API-token configuration changed through the API -->
   <rule id="100883" level="9">
     <decoded_as>pbs-access</decoded_as>
-    <action>^(?:PUT|POST|DELETE)$</action>
+    <action type="pcre2">^(?:PUT|POST|DELETE)$</action>
     <url type="pcre2">/access/(?:acl|users|roles)(?:/|\?|$)</url>
     <status>^200$</status>
     <description>PBS: access-control change ($(action) $(url)) by $(dstuser) from $(srcip) - users, ACL or API tokens</description>

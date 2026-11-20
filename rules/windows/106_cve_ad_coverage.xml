@@ -25,7 +25,7 @@
   <rule id="116200" level="13">
     <if_sid>60002</if_sid>
     <field name="win.system.providerName" type="pcre2">(?i)^netlogon$</field>
-    <field name="win.system.eventID">^(?:5827|5828|5830|5831)$</field>
+    <field name="win.system.eventID" type="pcre2">^(?:5827|5828|5830|5831)$</field>
     <options>no_full_log</options>
     <description>AD: Netlogon secure channel denied/allowed insecurely (event $(win.system.eventID)) on $(win.system.computer) - Zerologon attempt</description>
     <mitre><id>T1210</id></mitre>
@@ -139,7 +139,7 @@
        Confidence: MED. -->
   <rule id="116209" level="10">
     <if_sid>60103</if_sid>
-    <field name="win.system.eventID">^(?:4898|4899|4900)$</field>
+    <field name="win.system.eventID" type="pcre2">^(?:4898|4899|4900)$</field>
     <options>no_full_log</options>
     <description>AD CS: certificate template changed on the CA (event $(win.system.eventID)) by $(win.eventdata.subjectUserName)</description>
     <mitre><id>T1649</id></mitre>

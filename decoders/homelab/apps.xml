@@ -1,6 +1,6 @@
 <!--
   Homelab application + Wazuh-plane decoders (2026-11 threat review)
-  Parents: jellyfin, qbittorrent, seerr, smbd_audit, wazuh-manager-log
+  Parents: jellyfin, qbittorrent, seerr, smbd (stock, child smbd_audit), wazuh-manager-log
   (n8n uses the stock json decoder; no decoder is needed here)
 
   EVERY FORMAT BELOW IS TAKEN FROM VENDOR SOURCE CODE, NOT FROM A LIVE LOG. The exact
@@ -41,8 +41,9 @@
 </decoder>
 
 <!-- ===== Seerr (winston text log): "... [warn][API]: Failed sign-in attempt using invalid Seerr password {json}" ===== -->
+<!-- The syslog predecoder swallows the "[warn][API]:" part, so only the message text is matched. -->
 <decoder name="seerr">
-  <prematch type="pcre2">\[warn\]\[(?:API|Auth)\]: Failed sign-in attempt</prematch>
+  <prematch>Failed sign-in attempt</prematch>
 </decoder>
 
 <decoder name="seerr">
@@ -60,12 +61,10 @@
 <!-- ===== Samba vfs_full_audit via syslog (program smbd_audit) =====
      REQUIRES smb.conf:  full_audit:prefix = %u|%I|%S
      line: user|client|share|op|ok|args   (args are pipe separated, e.g. renameat src|dst) -->
+<!-- The stock decoder "smbd" (program_name ^smbd) already claims program smbd_audit and is
+     loaded first, so this decoder is a CHILD of it; the rules chain onto stock rule 13100. -->
 <decoder name="smbd_audit">
-  <program_name>^smbd_audit$</program_name>
-</decoder>
-
-<decoder name="smbd_audit">
-  <parent>smbd_audit</parent>
+  <parent>smbd</parent>
   <regex type="pcre2">^([^|]+)\|([^|]+)\|([^|]+)\|(\w+)\|(ok|fail[^|]*)\|?(.*)$</regex>
   <order>srcuser, srcip, smb.share, smb.op, smb.result, smb.args</order>
 </decoder>

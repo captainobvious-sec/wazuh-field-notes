@@ -58,11 +58,20 @@ New decoders: `decoders/homelab/apps.xml` (Jellyfin, qBittorrent, Seerr, Samba a
 
 ## Known limits
 
-- **Not run.** `lint_ruleset.py` passes and the regular expressions were checked against
-  sample lines, but `wazuh-analysisd -t` and `wazuh-logtest` have not seen these files.
+- **Tested on a 4.14.3 manager** (2026-11-20): `wazuh-analysisd -t` passes and 50 synthetic
+  events through `wazuh-logtest` fire the expected rule (including negative cases). This
+  caught four real defects before merge: PCRE groups without `type="pcre2"` (analysisd
+  rejected the file; `lint_ruleset.py` now checks for this), a stock `smbd` decoder that
+  swallowed the Samba lines, a stock rule 2501 that claimed qBittorrent failures first,
+  and a Seerr prematch that the syslog predecoder defeated.
+- **Not exercised end to end:** the Windows and FIM rules. `wazuh-logtest` cannot feed
+  `eventchannel` or `syscheck` events, so their field and regex logic was tested on a
+  temporary copy that used the `json` decoder in place of the stock parent rules. The parent
+  chain (60103 / 60002 / 60230 / 100350 / 550-554) itself was **not** exercised.
+  Frequency (`if_matched_sid`) rules do not accumulate in logtest and were not tested.
+- Samples were written from vendor source, not captured from the real services.
 - **Windows event parents.** Rules chain onto stock 60103, 60230 and 60002 and onto
-  custom 100350. The stock parent for a given event ID was read from the 4.14.3 manager,
-  but the chain was not exercised.
+  custom 100350. The stock parent for a given event ID was read from the 4.14.3 manager.
 - **Sources are HEAD, not your versions.** Log text was read from current source trees.
   Confirm it against the versions you actually run.
 - **Wazuh 5.** `ossec.log` enrolment lines differ in 5.x (one is no longer logged at INFO),
