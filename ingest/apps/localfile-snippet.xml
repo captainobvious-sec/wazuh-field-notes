@@ -1,0 +1,29 @@
+<!--
+  Application logs (rules 116320-116336). One block per host that runs the application;
+  replace the UPPERCASE placeholders. None of these are collected by default.
+-->
+
+<!-- Jellyfin (native install; in Docker point at the mounted config volume instead) -->
+<localfile>
+  <log_format>syslog</log_format>
+  <location>/var/log/jellyfin/log_*.log</location>
+</localfile>
+
+<!-- qBittorrent: file logging must be enabled in Options > Behavior > Log. English locale only. -->
+<localfile>
+  <log_format>syslog</log_format>
+  <location>QBITTORRENT_LOG_DIR/qbittorrent.log</location>
+</localfile>
+
+<!-- Seerr: read the text log from the config volume, NOT docker's json-file log
+     (docker wraps every line in JSON, which breaks the decoder). -->
+<localfile>
+  <log_format>syslog</log_format>
+  <location>SEERR_CONFIG_VOLUME/logs/*.log</location>
+</localfile>
+
+<!-- n8n: the audit event log (failed logins are written ONLY here). One JSON object per line. -->
+<localfile>
+  <log_format>json</log_format>
+  <location>N8N_DATA_DIR/n8nEventLog.log</location>
+</localfile>

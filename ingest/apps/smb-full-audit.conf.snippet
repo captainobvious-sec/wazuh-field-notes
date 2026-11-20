@@ -1,0 +1,12 @@
+# OpenMediaVault / Samba: audit the share operations the ransomware rules need
+# (rules 116310, 116311). Add to the share definition (OMV: Services > SMB > Share > Extra options)
+# and forward the host's syslog (default facility, program name smbd_audit) through the rsyslog
+# relay to Wazuh.
+#
+# The prefix MUST be exactly this: the decoder expects user|client|share.
+vfs objects = full_audit
+full_audit:prefix = %u|%I|%S
+full_audit:success = connect disconnect openat renameat unlinkat mkdirat
+full_audit:failure = connect openat renameat unlinkat
+# Older Samba releases use the op names open / rename / unlink instead of openat / renameat /
+# unlinkat; check `smbd --version` and adjust both this file and decoders/homelab/apps.xml.

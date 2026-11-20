@@ -1,0 +1,207 @@
+<!--
+  Self-hosted applications, Samba shares and the Wazuh plane itself (2026-11 threat review)
+  ID range: 116300-116399
+  Decoders: decoders/homelab/apps.xml   Ingest: ingest/apps/ and ingest/wazuh/
+
+  Every rule needs a log source that a stock agent does not collect: see ingest/README.md.
+  Confidence is MED for all: the log formats are from vendor source code and were never
+  checked against a live line. Run wazuh-logtest with a real line before trusting a rule.
+-->
+<group name="vuln_coverage,homelab,">
+
+  <!-- ===================================================================== -->
+  <!-- Wazuh manager (ossec.log, authd / remoted)                            -->
+  <!-- ===================================================================== -->
+
+  <!-- 116300: enrolment attempt with the wrong password -->
+  <rule id="116300" level="7">
+    <decoded_as>wazuh-manager-log</decoded_as>
+    <match>Invalid password provided by</match>
+    <description>Wazuh authd: enrolment with wrong password from $(srcip)</description>
+    <mitre><id>T1110</id></mitre>
+    <group>authentication_failed,wazuh_enrollment,</group>
+  </rule>
+
+  <rule id="116301" level="10" frequency="5" timeframe="300">
+    <if_matched_sid>116300</if_matched_sid>
+    <same_srcip />
+    <description>Wazuh authd: 5+ wrong enrolment passwords in 5 min from $(srcip) - enrolment password guessing</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,wazuh_enrollment,</group>
+  </rule>
+
+  <!-- 116302: enrolment rejected because the name or IP already exists: someone is trying
+       to take over an existing agent identity -->
+  <rule id="116302" level="8">
+    <decoded_as>wazuh-manager-log</decoded_as>
+    <regex type="pcre2">Duplicate (?:name|IP) '[^']*', rejecting enrollment</regex>
+    <description>Wazuh authd: enrolment rejected as duplicate of existing agent '$(wz.agent)' - possible agent impersonation</description>
+    <mitre><id>T1078</id></mitre>
+    <group>wazuh_enrollment,</group>
+  </rule>
+
+  <!-- 116303: enrolment request whose agent name is a path component or contains a path
+       separator. Matches the authd path-traversal bug class (names such as ".." deleting or
+       exposing manager directories). The line is logged BEFORE validation on affected builds.
+       Confidence: MED. -->
+  <rule id="116303" level="13">
+    <decoded_as>wazuh-manager-log</decoded_as>
+    <regex type="pcre2">Received request for a new agent \((?:\.{1,2}|[^)]*[/\\][^)]*)\)</regex>
+    <description>Wazuh authd: enrolment request with path-like agent name "$(wz.agent)" from $(srcip) - authd path traversal attempt</description>
+    <mitre><id>T1190</id></mitre>
+    <group>attack,wazuh_enrollment,</group>
+  </rule>
+
+  <!-- 116304: a new agent key was issued. Visibility rule: every legitimate enrolment shows
+       up here, so a new name appearing unexpectedly is the signal. -->
+  <rule id="116304" level="6">
+    <decoded_as>wazuh-manager-log</decoded_as>
+    <match>Agent key generated for</match>
+    <description>Wazuh authd: new agent key issued for '$(wz.agent)' (requested by $(srcip))</description>
+    <group>wazuh_enrollment,</group>
+  </rule>
+
+  <!-- 116305: remoted rejected an agent message: wrong key, corrupt payload, bad checksum -->
+  <rule id="116305" level="6">
+    <decoded_as>wazuh-manager-log</decoded_as>
+    <field name="wz.errcode">^(?:1403|1404|1406)$</field>
+    <description>Wazuh remoted: message from agent '$(wz.agent)' at $(srcip) rejected (error $(wz.errcode)) - wrong key or corrupt payload</description>
+    <mitre><id>T1550</id></mitre>
+    <group>wazuh_agent_auth,</group>
+  </rule>
+
+  <rule id="116306" level="10" frequency="10" timeframe="300">
+    <if_matched_sid>116305</if_matched_sid>
+    <same_srcip />
+    <description>Wazuh remoted: 10+ rejected agent messages in 5 min from $(srcip) - key guessing or a spoofed agent</description>
+    <mitre><id>T1550</id></mitre>
+    <group>wazuh_agent_auth,</group>
+  </rule>
+
+  <!-- 116307: replayed counter: the same key is in use from two places -->
+  <rule id="116307" level="9">
+    <decoded_as>wazuh-manager-log</decoded_as>
+    <regex type="pcre2">\(1407\): Duplicated counter|Agent key already in use</regex>
+    <description>Wazuh remoted: duplicated counter or key already in use ($(wz.agent)) - cloned agent key or replayed traffic</description>
+    <mitre><id>T1550</id></mitre>
+    <group>wazuh_agent_auth,</group>
+  </rule>
+
+  <!-- ===================================================================== -->
+  <!-- Samba full_audit (OpenMediaVault shares)                              -->
+  <!-- ===================================================================== -->
+
+  <!-- 116310: a file was renamed to a known ransomware extension.
+       Backup chunk stores rename temp files constantly, so the match is on the extension only. -->
+  <rule id="116310" level="12">
+    <decoded_as>smbd_audit</decoded_as>
+    <field name="smb.op">^renameat$</field>
+    <field name="smb.result">^ok$</field>
+    <field name="smb.args" type="pcre2">(?i)\.(?:locked|lockbit|encrypted|crypt\d*|crypted|enc|wncry|wcry|akira|royal|blacksuit|hive|basta|medusa|cerber|ryk|conti)(?:\||$)</field>
+    <description>SMB: $(srcuser) from $(srcip) renamed a file to a ransomware extension on share $(smb.share)</description>
+    <mitre><id>T1486</id></mitre>
+    <group>ransomware,</group>
+  </rule>
+
+  <!-- 116311: a ransom-note style file was created -->
+  <rule id="116311" level="12">
+    <decoded_as>smbd_audit</decoded_as>
+    <field name="smb.op">^openat$</field>
+    <field name="smb.args" type="pcre2">(?i)(?:README_?(?:TO_)?(?:DECRYPT|RESTORE)|HOW_?TO_?(?:DECRYPT|RECOVER)|DECRYPT[_ -]?(?:FILES|INSTRUCTIONS)|RESTORE[_ -]?(?:MY[_ -]?)?FILES|RECOVER[_ -]?(?:MY[_ -]?)?FILES)[^/|]*\.(?:txt|html?|hta)</field>
+    <description>SMB: ransom-note style file written by $(srcuser) from $(srcip) on share $(smb.share)</description>
+    <mitre><id>T1486</id></mitre>
+    <group>ransomware,</group>
+  </rule>
+
+  <!-- ===================================================================== -->
+  <!-- Application logins and exploit indicators                             -->
+  <!-- ===================================================================== -->
+
+  <!-- Jellyfin -->
+  <rule id="116320" level="5">
+    <decoded_as>jellyfin</decoded_as>
+    <regex type="pcre2">has been denied \(IP:</regex>
+    <description>Jellyfin: failed login for "$(srcuser)" from $(srcip)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failed,</group>
+  </rule>
+
+  <rule id="116321" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>116320</if_matched_sid>
+    <same_srcip />
+    <description>Jellyfin: 5+ failed logins in 2 min from $(srcip) - brute force</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,</group>
+  </rule>
+
+  <!-- 116322: server log line carrying an ffmpeg argument that reads a local file
+       (GHSA-jh22-fw8w-2v9x, unauthenticated file read via ffmpeg argument injection,
+       fixed in 10.11.7). A plain "-vf" is normal; only the file-reading forms match. -->
+  <rule id="116322" level="12">
+    <decoded_as>jellyfin</decoded_as>
+    <regex type="pcre2">(?i)textfile=|drawtext[^\s]*(?:/etc/|/proc/|/root/|\.ssh)|/etc/(?:shadow|passwd)|/proc/self/environ|\.ssh/id_</regex>
+    <description>Jellyfin: ffmpeg command line reads a local file - argument injection (file read) attempt</description>
+    <mitre><id>T1190</id><id>T1005</id></mitre>
+    <group>attack,</group>
+  </rule>
+
+  <!-- qBittorrent WebUI -->
+  <rule id="116325" level="5">
+    <decoded_as>qbittorrent</decoded_as>
+    <match>login failure. Reason: invalid credentials</match>
+    <description>qBittorrent: WebUI login failure for $(srcuser) from $(srcip) (attempt $(qbt.attempts))</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failed,</group>
+  </rule>
+
+  <rule id="116326" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>116325</if_matched_sid>
+    <same_srcip />
+    <description>qBittorrent: 5+ WebUI login failures in 2 min from $(srcip)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,</group>
+  </rule>
+
+  <rule id="116327" level="8">
+    <decoded_as>qbittorrent</decoded_as>
+    <match>IP has been banned</match>
+    <description>qBittorrent: WebUI banned $(srcip) after repeated failed logins</description>
+    <mitre><id>T1110</id></mitre>
+    <group>authentication_failures,</group>
+  </rule>
+
+  <!-- Seerr -->
+  <rule id="116330" level="5">
+    <decoded_as>seerr</decoded_as>
+    <description>Seerr: failed sign-in attempt for $(srcuser) from $(srcip)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failed,</group>
+  </rule>
+
+  <rule id="116331" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>116330</if_matched_sid>
+    <same_srcip />
+    <description>Seerr: 5+ failed sign-ins in 2 min from $(srcip)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,</group>
+  </rule>
+
+  <!-- n8n: failed login only exists as an audit event in the event log
+       (n8nEventLog.log, JSON), not in the console log. -->
+  <rule id="116335" level="5">
+    <decoded_as>json</decoded_as>
+    <field name="eventName">^n8n\.audit\.user\.login\.failed$</field>
+    <description>n8n: failed login (audit event) for $(payload.userEmail)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failed,</group>
+  </rule>
+
+  <rule id="116336" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>116335</if_matched_sid>
+    <same_location />
+    <description>n8n: 5+ failed logins in 2 min - brute force against the n8n editor</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,</group>
+  </rule>
+
+</group>

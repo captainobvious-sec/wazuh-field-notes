@@ -25,6 +25,16 @@
 # pkexec - PwnKit watch (rule 111150/111151)
 -a always,exit -F arch=b64 -S execve -F exe=/usr/bin/pkexec -k rocky_priv_pkexec
 
+# AF_ALG kernel crypto socket opened by a real user (rule 116001, kernel LPE class).
+# a0=38 is AF_ALG. cryptsetup/openssl-afalg are legitimate users - expect some noise.
+-a always,exit -F arch=b64 -S socket -F a0=38 -F auid>=1000 -F auid!=4294967295 -k rocky_priv_afalg
+
+## --- Container host (116_cve_coverage.xml: rules 116003 / 116004) ---
+# The generic execve rule above only logs euid=0. A user in the docker group runs the
+# docker CLI as itself, so audit the binary directly. Key audit-wazuh-c keeps it on the
+# 80792 path that the execve-content rules use. Only needed on the Docker host.
+-a always,exit -F arch=b64 -F exe=/usr/bin/docker -S execve -k audit-wazuh-c
+
 ## --- Credential access (113_lateral_movement.xml) ---
 # /etc/shadow + /etc/gshadow read (rule 111330)
 -w /etc/shadow  -p r -k rocky_cred_shadow

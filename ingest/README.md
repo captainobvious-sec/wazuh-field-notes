@@ -63,3 +63,21 @@ tail -f /var/log/unifi/unifi.log
 The base decoder tolerates both header forms (`^CEF$` and `^\d{4}-\d{2}-\d{2}T\d{2}$`)
 with an `Ubiquiti` content guard, so it still works if your relay is configured
 differently — but the rewrite above is the cleaner path.
+
+## Proxmox Backup Server access log
+
+`proxmox/localfile-snippet.xml` adds `/var/log/proxmox-backup/api/access.log` on each PBS
+agent. PBS writes no log line for snapshot/group deletion or API-token changes, so this is
+the only evidence for rules 100880-100883.
+
+## Wazuh manager `ossec.log`
+
+`wazuh/localfile-snippet.xml` goes into the **manager** `ossec.conf`. Without it the
+enrolment and wrong-key rules (116300-116307) never see a line.
+
+## Applications and Samba
+
+`apps/localfile-snippet.xml` (Jellyfin, qBittorrent, Seerr, n8n event log) and
+`apps/smb-full-audit.conf.snippet` (OpenMediaVault shares). Replace the UPPERCASE
+placeholders. Linux hosts that run Docker also need the `docker` audit rule and the new
+FIM entries already in `linux/wazuh-linux.rules` and `linux/syscheck-snippet.xml`.

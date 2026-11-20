@@ -15,9 +15,10 @@ rules/
   proxmox/                 Proxmox VE + PBS auth, VM/backup ops, storage
   unifi/                   UniFi firewall, IDS/IPS, WiFi/RADIUS, admin
   homelab/                 Homelab tuning (rootcheck/FIM/sudo noise, disk errors, log freshness),
-                           Cloudflare Access and local rules
+                           Cloudflare Access, local rules, app logins, Samba, Wazuh enrolment
 decoders/
-  proxmox/                 PVE/PBS field-extraction decoders
+  proxmox/                 PVE/PBS field-extraction decoders (+ PBS API access log)
+  homelab/                 Jellyfin, qBittorrent, Seerr, Samba audit, Wazuh ossec.log
   unifi/                   UniFi CEF + firewall + hostapd decoders
                            (Windows and Linux use the stock decoders — none needed)
 dashboards/                OpenSearch Dashboards saved-object exports (.ndjson)
@@ -48,8 +49,13 @@ experimental/              Known-incomplete work — NOT deployed, see its READM
 | 111300–111331 | Linux lateral movement / credential access (`113_lateral_movement.xml`) |
 | 111400–111470 | Linux defense evasion (`114_defense_evasion.xml`) |
 | 100800–100871 | Proxmox VE + PBS (`proxmox.xml`) |
+| 100880–100883 | PBS API access log: backup deletion, ACL/token changes (`proxmox_pbs_access.xml`) |
 | 100950–100972 | Homelab tuning (`109_homelab_tuning.xml`) |
 | 100010–100020, 100900–100903 | Homelab local rules, Cloudflare Access (`local_rules.xml`) |
+| 116000–116011 | Linux / Docker host exploit and tamper coverage (`116_cve_coverage.xml`) |
+| 116100–116101 | UniFi known-intrusion indicators (`116_unifi_cve_coverage.xml`) |
+| 116200–116211 | Windows / AD exploit techniques (`106_cve_ad_coverage.xml`) |
+| 116300–116336 | App logins, Samba ransomware, Wazuh enrolment (`116_apps_and_wazuh_plane.xml`) |
 | 129000–129013 | Cross-device correlation (`experimental/cross_device_correlation.xml`) |
 
 ## Deployment
@@ -62,7 +68,7 @@ sudo install -o wazuh -g wazuh -m 660 \
      rules/windows/*.xml rules/linux/*.xml rules/proxmox/*.xml rules/unifi/*.xml rules/homelab/*.xml \
      /var/ossec/etc/rules/
 sudo install -o wazuh -g wazuh -m 660 \
-     decoders/proxmox/*.xml decoders/unifi/*.xml /var/ossec/etc/decoders/
+     decoders/proxmox/*.xml decoders/unifi/*.xml decoders/homelab/*.xml /var/ossec/etc/decoders/
 
 sudo /var/ossec/bin/wazuh-analysisd -t          # must exit 0
 sudo systemctl restart wazuh-manager
@@ -72,7 +78,8 @@ Nothing in `experimental/` is deployed by those commands — that is deliberate.
 `experimental/README.md` before touching it; both files there have known limitations on
 4.14.x and one of them will make `wazuh-analysisd -t` fail.
 
-Rules alone are not enough for two platforms. **UniFi** needs a syslog relay and a
+Rules alone are not enough for two platforms (and the 116xxx rules need several extra log
+sources, see `docs/vuln-coverage.md`). **UniFi** needs a syslog relay and a
 `<localfile>` entry; **Linux** needs auditd rules and a FIM scope, without which 32 of its
 40 rules stay silent. Both are in `ingest/README.md`.
 

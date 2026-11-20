@@ -13,12 +13,13 @@ stock Wazuh Windows rulesets (`0575`, `0580`, `0840`, `0915`) and the Windows ev
 | `103_local_rules.xml` | 60xxx→0 + 110002/110003/100360 | Silences noisy base rules; defines Kerberoasting / Golden / Silver ticket |
 | `104_ad_correlation.xml` | 100300–100364 (+60154/59/66/67) | Account lifecycle, group changes, Kerberoasting, DCSync, spray, PsExec, Tier-0 |
 | `105_additional_ad_detections.xml` | 100218, 100333–100358 | Kerberos pre-auth spray/brute, username enum, OverPass-the-Hash, AS-REP roasting |
+| `106_cve_ad_coverage.xml` | 116200–116211 | Zerologon, noPac, RBCD, shadow credentials, AD CS, BadSuccessor, PetitPotam, AnyDesk (see `vuln-coverage.md`) |
 | `107_alert_tuning.xml` | 100601–100610 | Tier-1 composites (RDP-success-after-brute, Defender hard-kill, NTDS dump, webshell) |
 | `108_default_overrides.xml` | stock IDs (`overwrite`) | Email-tiering of stock rules without editing the base ruleset |
 
 `103_`, `104_` and `108_` contain content derived from the GPLv2 Wazuh default ruleset —
-see `NOTICE.md`. There is no `106_`: those PowerShell module-logging rules were merged
-into `101_powershell.xml`, which is why the numbering skips it.
+see `NOTICE.md`. The old `106_` PowerShell module-logging rules were merged into
+`101_powershell.xml`; the `106_` slot now holds the exploit-technique rules.
 
 ## Telemetry prerequisites (endpoints)
 

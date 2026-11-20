@@ -14,6 +14,12 @@
   *Homelab - Security Overview*.
 
 ### Added
+- **Vulnerability/attack-technique coverage** from a review of the homelab's technologies
+  (see `docs/vuln-coverage.md`): Linux/Docker exploit and tamper rules (116000-116011),
+  UniFi intrusion indicators (116100-116101), Windows/AD exploit techniques (116200-116211),
+  PBS API access-log rules (100880-100883), and app-login, Samba-ransomware and Wazuh
+  enrolment rules (116300-116336) with new decoders (`decoders/homelab/`,
+  `decoders/proxmox/pbs_access.xml`) and ingest snippets. **Not yet run against live logs.**
 - `rules/homelab/`: `109_homelab_tuning.xml` (rootcheck/FIM/sudo noise, kernel disk errors,
   rsyslog relay log freshness) and `local_rules.xml` (Cloudflare Access, local rules).
 

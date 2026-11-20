@@ -1,0 +1,175 @@
+<!--
+  Linux / Docker host - exploit and tamper coverage for the homelab threat review (2026-11)
+  Load order: 116 (after defence evasion 114 and the package-maintenance tuning 115)
+  Custom ID range: 116000-116099
+
+  SOURCES: research notes in private/ (not tracked). Confidence is stated per rule:
+    HIGH  = detection string taken from vendor source or an advisory
+    MED   = technique is well known, exact string composed from the auditd/FIM record shape
+    LOW   = signal is generic, expect tuning
+  None of these were exercised against a live host when written: validate each with
+  /var/ossec/bin/wazuh-logtest and one real trigger before relying on it.
+
+  TELEMETRY PREREQUISITES
+   [AUDIT-EXEC] generic execve auditing, key audit-wazuh-c (ingest/linux/wazuh-linux.rules).
+                The Docker CLI is audited by exe path there too, because the stock
+                euid=0 filter misses a docker-group user.
+   [FIM]        paths added to ingest/linux/syscheck-snippet.xml
+   [AUDIT]      rocky_priv_afalg key (same file)
+  Rules chain onto 80792/92600 (execve content) and 550/553/554 (FIM) exactly like 111430
+  and 111200, so they inherit the same decoder behaviour.
+-->
+<group name="vuln_coverage,linux,">
+
+  <!-- ===================================================================== -->
+  <!-- Privilege escalation                                                  -->
+  <!-- ===================================================================== -->
+
+  <!-- 116000: sudo with the chroot option (-R / long form) = CVE-2025-32463 (CISA KEV).
+       The sudo log line is NOT reliable for this (CHROOT= is omitted when the sudoers
+       policy allows any directory), so the match is on audit EXECVE argv.
+       The regex walks only the sudo OPTIONS (dash args, each optionally followed by one
+       value) so that "sudo ls -R /etc" (a recursive ls) does not match.
+       Confidence: HIGH (advisory + sudo NEWS), pattern untested. -->
+  <rule id="116000" level="13">
+    <if_sid>80792,92600</if_sid>
+    <match type="pcre2">a0="(?:[^"]*/)?sudo"(?:\s+a\d+="-[^"]*"(?:\s+a\d+="[^-][^"]*")?)*?\s+a\d+="(?:-R|--chroot(?:=[^"]*)?)"</match>
+    <description>PrivEsc: sudo run with the chroot option on $(agent.name) - CVE-2025-32463 exploitation pattern</description>
+    <mitre><id>T1068</id></mitre>
+    <group>sudo_chroot,cve_2025_32463,</group>
+  </rule>
+
+  <!-- 116001: unprivileged AF_ALG socket (kernel crypto API) [AUDIT key rocky_priv_afalg].
+       Used by recent kernel LPE exploits of the AF_ALG class; cryptsetup, some openssl
+       builds and kcapi tools use it legitimately, so this stays at level 8 and is
+       excluded from email. Confidence: MED/LOW (exploit class from secondary sources). -->
+  <rule id="116001" level="8">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">rocky_priv_afalg</field>
+    <options>no_email_alert</options>
+    <description>PrivEsc: non-root process opened an AF_ALG kernel crypto socket on $(agent.name) - review (kernel LPE class)</description>
+    <mitre><id>T1068</id></mitre>
+    <group>kernel_lpe,</group>
+  </rule>
+
+  <!-- 116002: /etc/ld.so.preload created or changed [FIM: /etc/ld.so.preload].
+       The file does not exist on a normal system, so ANY appearance is a library
+       injection / rootkit indicator. Confidence: HIGH. -->
+  <rule id="116002" level="14">
+    <if_sid>550,553,554</if_sid>
+    <field name="file" type="pcre2">^/etc/ld\.so\.preload$</field>
+    <description>Evasion: /etc/ld.so.preload created or modified on $(agent.name) - shared-library injection / rootkit</description>
+    <mitre><id>T1574.006</id></mitre>
+    <group>ld_preload,rootkit_indicator,</group>
+  </rule>
+
+  <!-- ===================================================================== -->
+  <!-- Container host                                                        -->
+  <!-- ===================================================================== -->
+
+  <!-- 116003: docker started with host-level privileges (privileged, host PID/IPC,
+       dangerous capability, unconfined security profile) [AUDIT-EXEC].
+       Typical container-escape staging after a foothold in an app container.
+       Confidence: MED. Legitimate admin work will trigger it; tune by user. -->
+  <rule id="116003" level="10">
+    <if_sid>80792,92600</if_sid>
+    <match type="pcre2">a0="(?:[^"]*/)?docker"(?:\s+a\d+="[^"]*")*?\s+a\d+="(?:--privileged(?:=true)?|--pid=host|--ipc=host|--userns=host|--cap-add=(?:ALL|SYS_ADMIN|SYS_PTRACE|SYS_MODULE)|--security-opt=(?:apparmor|seccomp)=unconfined)"</match>
+    <description>Container: docker run/exec with host-level privileges on $(agent.name) - possible container escape staging</description>
+    <mitre><id>T1611</id></mitre>
+    <group>container_escape,</group>
+  </rule>
+
+  <!-- 116004: docker given the host root filesystem or the docker socket as a mount
+       (both the short and the mount form). Mounting the socket inside a container is the
+       classic escape path. Confidence: MED. -->
+  <rule id="116004" level="11">
+    <if_sid>80792,92600</if_sid>
+    <match type="pcre2">a0="(?:[^"]*/)?docker"(?:\s+a\d+="[^"]*")*?\s+a\d+="(?:(?:/|/etc|/root|/var/run/docker\.sock|/run/docker\.sock):[^"]*|[^"]*(?:src|source)=(?:/|/var/run/docker\.sock|/run/docker\.sock)(?:,[^"]*)?)"</match>
+    <description>Container: host root or docker.sock mounted into a container on $(agent.name) - container escape path</description>
+    <mitre><id>T1611</id></mitre>
+    <group>container_escape,</group>
+  </rule>
+
+  <!-- ===================================================================== -->
+  <!-- Defence evasion: blinding logging and Wazuh                           -->
+  <!-- ===================================================================== -->
+
+  <!-- 116005: logging or audit service stopped / disabled / masked [AUDIT-EXEC].
+       wazuh-agent itself is handled by 111430. Confidence: HIGH (technique), MED (string). -->
+  <rule id="116005" level="12">
+    <if_sid>80792,92600</if_sid>
+    <match type="pcre2">a0="(?:[^"]*/)?systemctl"(?:\s+a\d+="-[^"]*")*\s+a\d+="(?:stop|disable|mask|kill)"(?:\s+a\d+="-[^"]*")*\s+a\d+="(?:rsyslog|syslog|systemd-journald|auditd)(?:\.service|\.socket)?"</match>
+    <description>Evasion: logging/audit service stopped or disabled on $(agent.name) - logs may be going dark</description>
+    <mitre><id>T1562.001</id><id>T1562.006</id></mitre>
+    <group>logging_disabled,</group>
+  </rule>
+
+  <!-- 116006: truncate used on a file under /var/log [AUDIT-EXEC]. The shell redirect
+       form (": > file") is not an execve and is not visible. Confidence: MED. -->
+  <rule id="116006" level="10">
+    <if_sid>80792,92600</if_sid>
+    <match type="pcre2">a0="(?:[^"]*/)?truncate"(?:\s+a\d+="[^"]*")*?\s+a\d+="/var/log/[^"]*"</match>
+    <description>Evasion: truncate run against a file in /var/log on $(agent.name) - log wiping</description>
+    <mitre><id>T1070.002</id></mitre>
+    <group>log_tampering,</group>
+  </rule>
+
+  <!-- 116007: journald vacuum / rotate [AUDIT-EXEC]. Admins and maintenance scripts do
+       this legitimately, so low level and no email; it is useful as context next to
+       116005/116006. Confidence: MED. -->
+  <rule id="116007" level="6">
+    <if_sid>80792,92600</if_sid>
+    <match type="pcre2">a0="(?:[^"]*/)?journalctl"(?:\s+a\d+="[^"]*")*?\s+a\d+="--(?:vacuum-(?:time|size|files)=[^"]*|rotate)"</match>
+    <options>no_email_alert</options>
+    <description>Evasion: journalctl vacuum/rotate run on $(agent.name) - journal history removed</description>
+    <mitre><id>T1070.002</id></mitre>
+    <group>log_tampering,</group>
+  </rule>
+
+  <!-- 116008: rsyslog configuration changed [FIM: /etc/rsyslog.conf, /etc/rsyslog.d].
+       The relay forwarding config is what makes network devices visible. Confidence: HIGH. -->
+  <rule id="116008" level="10">
+    <if_sid>550,553,554</if_sid>
+    <field name="file" type="pcre2">^/etc/rsyslog(?:\.conf|\.d/.+)$</field>
+    <description>Evasion: rsyslog configuration changed ($(file)) on $(agent.name) - log forwarding may be altered</description>
+    <mitre><id>T1562.006</id></mitre>
+    <group>logging_config_changed,</group>
+  </rule>
+
+  <!-- 116009: Wazuh agent identity/config files changed on an endpoint
+       [FIM: /var/ossec/etc, restricted to the three files]. Confidence: MED.
+       Expect one alert after a legitimate enrolment or group config sync. -->
+  <rule id="116009" level="12">
+    <if_sid>550,553,554</if_sid>
+    <field name="file" type="pcre2">^/var/ossec/etc/(?:ossec\.conf|client\.keys|local_internal_options\.conf)$</field>
+    <description>Evasion: Wazuh agent configuration or key file changed ($(file)) on $(agent.name)</description>
+    <mitre><id>T1562.001</id></mitre>
+    <group>security_tool_tamper,</group>
+  </rule>
+
+  <!-- ===================================================================== -->
+  <!-- Remote access and mounts                                              -->
+  <!-- ===================================================================== -->
+
+  <!-- 116010: sshd configuration changed [FIM: /etc/ssh is already realtime in the
+       snippet]. Typical: PermitRootLogin, extra AuthorizedKeysFile, new listener, a
+       Match block for backdoor access. Confidence: HIGH (FIM), alert follows 111240-style noise on upgrades. -->
+  <rule id="116010" level="10">
+    <if_sid>550,553,554</if_sid>
+    <field name="file" type="pcre2">^/etc/ssh/sshd_config(?:\.d/.+)?$</field>
+    <description>Persistence: sshd configuration changed ($(file)) on $(agent.name)</description>
+    <mitre><id>T1098.004</id></mitre>
+    <group>sshd_config_changed,</group>
+  </rule>
+
+  <!-- 116011: fstab / NFS exports changed [FIM: /etc/fstab, /etc/exports]. New network
+       mounts or exports are how data is staged or ransomware reaches the NAS shares.
+       Confidence: MED. No MITRE id: the technique depends on intent. -->
+  <rule id="116011" level="7">
+    <if_sid>550,553,554</if_sid>
+    <field name="file" type="pcre2">^/etc/(?:fstab|exports|exports\.d/.+)$</field>
+    <description>Mounts: $(file) changed on $(agent.name) - new or altered network mount/export</description>
+    <group>mount_config_changed,</group>
+  </rule>
+
+</group>
