@@ -56,22 +56,48 @@ New decoders: `decoders/homelab/apps.xml` (Jellyfin, qBittorrent, Seerr, Samba a
 | Mass unlink on SMB shares | Backup garbage collection deletes chunks in bulk; a rule would fire on every GC. |
 | LSASS access | Needs Sysmon, which the Windows ruleset deliberately does not require. |
 
+## Rollout and test status (2026-11-20)
+
+Deployed to the 4.14.3 manager and to the agents listed below, then triggered for real.
+Every row marked **fired** produced the expected alert from a genuine log line.
+
+| Rules | Where | Result |
+|---|---|---|
+| 116002, 116008 | Docker VM, `Linux` group (`/etc` realtime) | **fired** (create/delete `ld.so.preload`, new file in `rsyslog.d`) |
+| 116001, 116003, 116004 | Docker VM, auditd with `wazuh-docker-host.rules` | **fired** (AF_ALG socket, `docker run --privileged`, docker.sock mount) |
+| 116320 | Jellyfin VM | **fired** (one wrong login) |
+| 116325 | Torrent VM (qBittorrent) | **fired** |
+| 116330, 116335 | Docker VM (Seerr, n8n event log) | **fired** |
+| 116300–116307 | manager `ossec.log` collected | rules unit-tested only: no enrolment has happened since |
+| 116009–116011 | `Linux` group FIM | logic tested, not triggered live |
+| 100880–100883 | PBS | **not rolled out**: no access to the PBS hosts |
+| 116310, 116311 | OpenMediaVault Samba | **not rolled out**: OMV is stopped, agent disconnected |
+| 116200–116211 | LAB-DC / LAB-W11 | **not rolled out**: lab VMs are stopped |
+| 116000 | Docker VM | **not applicable**: this host runs sudo-rs, which has no `-R` |
+
+Findings from the real logs: the Jellyfin file template of this build has no thread id or
+source context (decoder fixed), and on Ubuntu the enriched auditd format makes the stock rule
+92600 claim SYSCALL records, so key-based rules must chain onto `80700,92600` (116001 does;
+the older `111xxx` key rules chain onto 80700 only).
+
 ## Known limits
 
-- **Tested on a 4.14.3 manager** (2026-11-20): `wazuh-analysisd -t` passes and 50 synthetic
-  events through `wazuh-logtest` fire the expected rule (including negative cases). This
-  caught four real defects before merge: PCRE groups without `type="pcre2"` (analysisd
-  rejected the file; `lint_ruleset.py` now checks for this), a stock `smbd` decoder that
-  swallowed the Samba lines, a stock rule 2501 that claimed qBittorrent failures first,
-  and a Seerr prematch that the syslog predecoder defeated.
-- **Not exercised end to end:** the Windows and FIM rules. `wazuh-logtest` cannot feed
-  `eventchannel` or `syscheck` events, so their field and regex logic was tested on a
-  temporary copy that used the `json` decoder in place of the stock parent rules. The parent
-  chain (60103 / 60002 / 60230 / 100350 / 550-554) itself was **not** exercised.
-  Frequency (`if_matched_sid`) rules do not accumulate in logtest and were not tested.
-- Samples were written from vendor source, not captured from the real services.
+- **Tested on a 4.14.3 manager.** `wazuh-analysisd -t` passes and 50 synthetic events through
+  `wazuh-logtest` fire the expected rule (including negative cases). That caught four defects
+  before the live rollout: PCRE groups without `type="pcre2"` (analysisd rejected the file;
+  `lint_ruleset.py` now checks for this), a stock `smbd` decoder that swallowed the Samba lines,
+  stock rule 2501 claiming qBittorrent failures first, and a Seerr prematch defeated by the
+  syslog predecoder.
+- **Windows rules are unexercised.** `wazuh-logtest` cannot feed `eventchannel` events, so their
+  field and regex logic was tested on a temporary copy that used the `json` decoder in place of
+  the stock parents. The parent chain (60103 / 60002 / 60230 / 100350) was not exercised, and the
+  lab domain controller is powered off.
+- Frequency (`if_matched_sid`) rules do not accumulate in logtest and were not triggered live.
 - **Windows event parents.** Rules chain onto stock 60103, 60230 and 60002 and onto
   custom 100350. The stock parent for a given event ID was read from the 4.14.3 manager.
+- **Wazuh enrolment is passwordless** on this manager (`<use_password>no`), so the 2026 authd
+  advisories are reachable by any host that can reach port 1515. Rules 116300–116307 only
+  detect it; setting an enrolment password closes it.
 - **Sources are HEAD, not your versions.** Log text was read from current source trees.
   Confirm it against the versions you actually run.
 - **Wazuh 5.** `ossec.log` enrolment lines differ in 5.x (one is no longer logged at INFO),

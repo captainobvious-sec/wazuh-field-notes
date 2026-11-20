@@ -3,10 +3,10 @@
   replace the UPPERCASE placeholders. None of these are collected by default.
 -->
 
-<!-- Jellyfin (native install; in Docker point at the mounted config volume instead) -->
+<!-- Jellyfin (native install; files are named jellyfinYYYYMMDD.log; in Docker point at the config volume) -->
 <localfile>
   <log_format>syslog</log_format>
-  <location>/var/log/jellyfin/log_*.log</location>
+  <location>/var/log/jellyfin/jellyfin*.log</location>
 </localfile>
 
 <!-- qBittorrent: file logging must be enabled in Options > Behavior > Log. English locale only. -->
@@ -19,7 +19,7 @@
      (docker wraps every line in JSON, which breaks the decoder). -->
 <localfile>
   <log_format>syslog</log_format>
-  <location>SEERR_CONFIG_VOLUME/logs/*.log</location>
+  <location>SEERR_CONFIG_VOLUME/logs/seerr-*.log</location>
 </localfile>
 
 <!-- n8n: the audit event log (failed logins are written ONLY here). One JSON object per line. -->

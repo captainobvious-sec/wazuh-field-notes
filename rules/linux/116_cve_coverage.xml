@@ -11,9 +11,9 @@
   /var/ossec/bin/wazuh-logtest and one real trigger before relying on it.
 
   TELEMETRY PREREQUISITES
-   [AUDIT-EXEC] generic execve auditing, key audit-wazuh-c (ingest/linux/wazuh-linux.rules).
-                The Docker CLI is audited by exe path there too, because the stock
-                euid=0 filter misses a docker-group user.
+   [AUDIT-EXEC] execve auditing with key audit-wazuh-c: generic (ingest/linux/wazuh-linux.rules,
+                Rocky servers) or by binary (ingest/linux/wazuh-docker-host.rules, container hosts).
+                The Docker CLI is audited by exe path because the euid=0 filter misses a docker-group user.
    [FIM]        paths added to ingest/linux/syscheck-snippet.xml
    [AUDIT]      rocky_priv_afalg key (same file)
   Rules chain onto 80792/92600 (execve content) and 550/553/554 (FIM) exactly like 111430
@@ -34,7 +34,7 @@
   <rule id="116000" level="13">
     <if_sid>80792,92600</if_sid>
     <match type="pcre2">a0="(?:[^"]*/)?sudo"(?:\s+a\d+="-[^"]*"(?:\s+a\d+="[^-][^"]*")?)*?\s+a\d+="(?:-R|--chroot(?:=[^"]*)?)"</match>
-    <description>PrivEsc: sudo run with the chroot option on $(agent.name) - CVE-2025-32463 exploitation pattern</description>
+    <description>PrivEsc: sudo run with the chroot option - CVE-2025-32463 exploitation pattern (classic sudo only; sudo-rs has no -R)</description>
     <mitre><id>T1068</id></mitre>
     <group>sudo_chroot,cve_2025_32463,</group>
   </rule>
@@ -44,10 +44,10 @@
        builds and kcapi tools use it legitimately, so this stays at level 8 and is
        excluded from email. Confidence: MED/LOW (exploit class from secondary sources). -->
   <rule id="116001" level="8">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key">rocky_priv_afalg</field>
     <options>no_email_alert</options>
-    <description>PrivEsc: non-root process opened an AF_ALG kernel crypto socket on $(agent.name) - review (kernel LPE class)</description>
+    <description>PrivEsc: non-root process opened an AF_ALG kernel crypto socket - review (kernel LPE class)</description>
     <mitre><id>T1068</id></mitre>
     <group>kernel_lpe,</group>
   </rule>
@@ -58,7 +58,7 @@
   <rule id="116002" level="14">
     <if_sid>550,553,554</if_sid>
     <field name="file" type="pcre2">^/etc/ld\.so\.preload$</field>
-    <description>Evasion: /etc/ld.so.preload created or modified on $(agent.name) - shared-library injection / rootkit</description>
+    <description>Evasion: /etc/ld.so.preload created or modified - shared-library injection / rootkit</description>
     <mitre><id>T1574.006</id></mitre>
     <group>ld_preload,rootkit_indicator,</group>
   </rule>
@@ -74,7 +74,7 @@
   <rule id="116003" level="10">
     <if_sid>80792,92600</if_sid>
     <match type="pcre2">a0="(?:[^"]*/)?docker"(?:\s+a\d+="[^"]*")*?\s+a\d+="(?:--privileged(?:=true)?|--pid=host|--ipc=host|--userns=host|--cap-add=(?:ALL|SYS_ADMIN|SYS_PTRACE|SYS_MODULE)|--security-opt=(?:apparmor|seccomp)=unconfined)"</match>
-    <description>Container: docker run/exec with host-level privileges on $(agent.name) - possible container escape staging</description>
+    <description>Container: docker run/exec with host-level privileges - possible container escape staging</description>
     <mitre><id>T1611</id></mitre>
     <group>container_escape,</group>
   </rule>
@@ -85,7 +85,7 @@
   <rule id="116004" level="11">
     <if_sid>80792,92600</if_sid>
     <match type="pcre2">a0="(?:[^"]*/)?docker"(?:\s+a\d+="[^"]*")*?\s+a\d+="(?:(?:/|/etc|/root|/var/run/docker\.sock|/run/docker\.sock):[^"]*|[^"]*(?:src|source)=(?:/|/var/run/docker\.sock|/run/docker\.sock)(?:,[^"]*)?)"</match>
-    <description>Container: host root or docker.sock mounted into a container on $(agent.name) - container escape path</description>
+    <description>Container: host root or docker.sock mounted into a container - container escape path</description>
     <mitre><id>T1611</id></mitre>
     <group>container_escape,</group>
   </rule>
@@ -99,7 +99,7 @@
   <rule id="116005" level="12">
     <if_sid>80792,92600</if_sid>
     <match type="pcre2">a0="(?:[^"]*/)?systemctl"(?:\s+a\d+="-[^"]*")*\s+a\d+="(?:stop|disable|mask|kill)"(?:\s+a\d+="-[^"]*")*\s+a\d+="(?:rsyslog|syslog|systemd-journald|auditd)(?:\.service|\.socket)?"</match>
-    <description>Evasion: logging/audit service stopped or disabled on $(agent.name) - logs may be going dark</description>
+    <description>Evasion: logging/audit service stopped or disabled - logs may be going dark</description>
     <mitre><id>T1562.001</id><id>T1562.006</id></mitre>
     <group>logging_disabled,</group>
   </rule>
@@ -109,7 +109,7 @@
   <rule id="116006" level="10">
     <if_sid>80792,92600</if_sid>
     <match type="pcre2">a0="(?:[^"]*/)?truncate"(?:\s+a\d+="[^"]*")*?\s+a\d+="/var/log/[^"]*"</match>
-    <description>Evasion: truncate run against a file in /var/log on $(agent.name) - log wiping</description>
+    <description>Evasion: truncate run against a file in /var/log - log wiping</description>
     <mitre><id>T1070.002</id></mitre>
     <group>log_tampering,</group>
   </rule>
@@ -121,7 +121,7 @@
     <if_sid>80792,92600</if_sid>
     <match type="pcre2">a0="(?:[^"]*/)?journalctl"(?:\s+a\d+="[^"]*")*?\s+a\d+="--(?:vacuum-(?:time|size|files)=[^"]*|rotate)"</match>
     <options>no_email_alert</options>
-    <description>Evasion: journalctl vacuum/rotate run on $(agent.name) - journal history removed</description>
+    <description>Evasion: journalctl vacuum/rotate run - journal history removed</description>
     <mitre><id>T1070.002</id></mitre>
     <group>log_tampering,</group>
   </rule>
@@ -131,7 +131,7 @@
   <rule id="116008" level="10">
     <if_sid>550,553,554</if_sid>
     <field name="file" type="pcre2">^/etc/rsyslog(?:\.conf|\.d/.+)$</field>
-    <description>Evasion: rsyslog configuration changed ($(file)) on $(agent.name) - log forwarding may be altered</description>
+    <description>Evasion: rsyslog configuration changed ($(file)) - log forwarding may be altered</description>
     <mitre><id>T1562.006</id></mitre>
     <group>logging_config_changed,</group>
   </rule>
@@ -142,7 +142,7 @@
   <rule id="116009" level="12">
     <if_sid>550,553,554</if_sid>
     <field name="file" type="pcre2">^/var/ossec/etc/(?:ossec\.conf|client\.keys|local_internal_options\.conf)$</field>
-    <description>Evasion: Wazuh agent configuration or key file changed ($(file)) on $(agent.name)</description>
+    <description>Evasion: Wazuh agent configuration or key file changed ($(file))</description>
     <mitre><id>T1562.001</id></mitre>
     <group>security_tool_tamper,</group>
   </rule>
@@ -157,7 +157,7 @@
   <rule id="116010" level="10">
     <if_sid>550,553,554</if_sid>
     <field name="file" type="pcre2">^/etc/ssh/sshd_config(?:\.d/.+)?$</field>
-    <description>Persistence: sshd configuration changed ($(file)) on $(agent.name)</description>
+    <description>Persistence: sshd configuration changed ($(file))</description>
     <mitre><id>T1098.004</id></mitre>
     <group>sshd_config_changed,</group>
   </rule>
@@ -168,7 +168,7 @@
   <rule id="116011" level="7">
     <if_sid>550,553,554</if_sid>
     <field name="file" type="pcre2">^/etc/(?:fstab|exports|exports\.d/.+)$</field>
-    <description>Mounts: $(file) changed on $(agent.name) - new or altered network mount/export</description>
+    <description>Mounts: $(file) changed - new or altered network mount/export</description>
     <group>mount_config_changed,</group>
   </rule>
 

@@ -11,15 +11,19 @@
   does not match lines of another kind (same pattern as decoders/unifi/unifi.xml).
 -->
 
-<!-- ===== Jellyfin: /var/log/jellyfin/log_*.log (file Serilog template) ===== -->
-<!-- [2026-11-20 10:00:00.000 +01:00] [INF] [14] Jellyfin.Server.Implementations.Users.UserManager: Authentication request for "name" has been denied (IP: "addr"). -->
+<!-- ===== Jellyfin: /var/log/jellyfin/jellyfinYYYYMMDD.log =====
+     Real format (checked on a 10.11 install): "[2026-11-20 18:33:57.651 +00:00] [INF] message" - the
+     file template of this build has no thread id and no source context, so the failed-login
+     line is expected as:
+     [ts] [INF] Authentication request for "name" has been denied (IP: "addr").
+     (not observed yet: no failed login has occurred on the reference host) -->
 <decoder name="jellyfin">
-  <prematch type="pcre2">^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} [+-]\d\d:\d\d\] \[[A-Z]{3}\] \[\d+\] </prematch>
+  <prematch type="pcre2">^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} [+-]\d\d:\d\d\] \[[A-Z]{3}\] </prematch>
 </decoder>
 
 <decoder name="jellyfin">
   <parent>jellyfin</parent>
-  <regex type="pcre2">UserManager: Authentication request for "?(.*?)"? has been denied \(IP: "?([^")]+)"?\)</regex>
+  <regex type="pcre2">Authentication request for "?(.*?)"? has been denied \(IP: "?([^")]+)"?\)</regex>
   <order>srcuser, srcip</order>
 </decoder>
 

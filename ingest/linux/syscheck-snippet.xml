@@ -26,13 +26,15 @@
   <directories check_all="yes" realtime="yes">/etc/profile.d</directories>
   <directories check_all="yes" realtime="yes" restrict="\.(bashrc|bash_profile|profile|bash_login|zshrc|bash_history)$">/root</directories>
 
-  <!-- library injection (rule 116002): /etc/ld.so.preload must not exist. realtime on /etc
-       restricted to this one name; the inotify cost is a few hundred watches. -->
-  <directories check_all="yes" realtime="yes" restrict="^ld\.so\.preload$">/etc</directories>
+  <!-- library injection (rule 116002): /etc/ld.so.preload must not exist. inotify cannot watch a
+       file that does not exist yet (a file-level entry never fires), so /etc itself goes realtime.
+       Same options as the stock entry plus realtime. Do NOT add restrict= here: that would replace the
+       stock /etc entry and silence every other /etc rule (116008-116011, 111xxx). -->
+  <directories check_all="yes" realtime="yes">/etc</directories>
 
   <!-- log forwarding, network mounts, agent identity (rules 116008, 116011, 116009) -->
   <directories check_all="yes" whodata="yes">/etc/rsyslog.conf,/etc/rsyslog.d</directories>
-  <directories check_all="yes">/etc/fstab,/etc/exports,/etc/exports.d</directories>
+  <directories check_all="yes" realtime="yes">/etc/fstab,/etc/exports,/etc/exports.d</directories>
   <directories check_all="yes" realtime="yes" restrict="^(ossec\.conf|client\.keys|local_internal_options\.conf)$">/var/ossec/etc</directories>
 
   <!-- kernel / boot (rule 111121) -->
