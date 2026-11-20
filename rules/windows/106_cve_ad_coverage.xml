@@ -1,0 +1,176 @@
+<!--
+  Windows / Active Directory - exploit-technique coverage for the homelab threat review (2026-11)
+  Load order: 106 (after 104/105, before 107_alert_tuning)
+  Custom ID range: 116200-116299
+
+  Chains: Security channel -> 60103 (audit success) / 60104 (failure); 5136 -> 100350 (the
+  generic "directory object modified" rule in 104, so these are children of it - a sibling
+  would be shadowed because 104 loads first); 5137 -> stock 60230; System channel -> 60002.
+  Confidence per rule: HIGH = Microsoft documented event; MED = event shape from public
+  write-ups; LOW = noisy or version dependent.
+
+  NOT exercised against a live domain controller. Prerequisites, without which these stay silent:
+    * Audit Directory Service Changes (5136/5137), Audit Computer Account Management (4741/4742),
+      Audit Detailed File Share (5145), Audit Process Creation + command line (4688),
+      Certification Services auditing (4898-4900) on a CA.
+    * System log forwarded from the DC for the Netlogon events.
+-->
+<group name="windows,ad_attack,vuln_coverage,">
+
+  <!-- ===== Zerologon (CVE-2020-1472), Netlogon in the System log ===== -->
+
+  <!-- 116200: DC DENIED an insecure Netlogon secure-channel connection (5827/5828 machine
+       or trust account, 5830/5831 allowed by policy exception). After the 2020 fixes these
+       events are the exploit attempt itself. Confidence: HIGH (Microsoft KB4557222). -->
+  <rule id="116200" level="13">
+    <if_sid>60002</if_sid>
+    <field name="win.system.providerName" type="pcre2">(?i)^netlogon$</field>
+    <field name="win.system.eventID" type="pcre2">^(?:5827|5828|5830|5831)$</field>
+    <options>no_full_log</options>
+    <description>AD: Netlogon secure channel denied/allowed insecurely (event $(win.system.eventID)) on $(win.system.computer) - Zerologon attempt</description>
+    <mitre><id>T1210</id></mitre>
+    <group>attack,zerologon,cve_2020_1472,</group>
+  </rule>
+
+  <!-- 116201: event 5829 = a vulnerable Netlogon connection was ALLOWED (enforcement not on
+       or a non-compliant device). Medium: shows exposure even without an exploit. -->
+  <rule id="116201" level="9">
+    <if_sid>60002</if_sid>
+    <field name="win.system.providerName" type="pcre2">(?i)^netlogon$</field>
+    <field name="win.system.eventID">^5829$</field>
+    <options>no_full_log</options>
+    <description>AD: vulnerable Netlogon secure channel connection allowed on $(win.system.computer) - non-compliant device or Zerologon exposure</description>
+    <mitre><id>T1210</id></mitre>
+    <group>zerologon,cve_2020_1472,</group>
+  </rule>
+
+  <!-- ===== noPac (CVE-2021-42278 / 42287) ===== -->
+
+  <!-- 116202: a computer account's sAMAccountName was changed to a name that does NOT end
+       in "$" (the spoof of a DC account). 4742 lists SamAccountName only when it changed;
+       "-" means unchanged. Confidence: MED-HIGH. -->
+  <rule id="116202" level="12">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4742$</field>
+    <field name="win.eventdata.samAccountName" type="pcre2">^(?!-$)(?!$).*[^$]$</field>
+    <options>no_full_log</options>
+    <description>AD: computer account renamed without trailing $ ($(win.eventdata.samAccountName)) by $(win.eventdata.subjectUserName) - noPac / sAMAccountName spoofing</description>
+    <mitre><id>T1068</id><id>T1078.002</id></mitre>
+    <group>attack,nopac,cve_2021_42278,</group>
+  </rule>
+
+  <!-- ===== Directory attribute abuse (children of 100350) ===== -->
+
+  <!-- 116203: msDS-AllowedToActOnBehalfOfOtherIdentity written = resource-based constrained
+       delegation setup (RBCD), the usual follow-up to a relayed or created machine account.
+       Confidence: MED. -->
+  <rule id="116203" level="13">
+    <if_sid>100350</if_sid>
+    <field name="win.eventdata.attributeLDAPDisplayName" type="pcre2">(?i)^msDS-AllowedToActOnBehalfOfOtherIdentity$</field>
+    <options>no_full_log</options>
+    <description>AD: RBCD attribute written on $(win.eventdata.objectDN) by $(win.eventdata.subjectUserName) - delegation abuse</description>
+    <mitre><id>T1098</id></mitre>
+    <group>attack,delegation,rbcd,</group>
+  </rule>
+
+  <!-- 116204: msDS-KeyCredentialLink written = "shadow credentials" account takeover.
+       Legitimate writers are Windows Hello for Business / Entra Connect; expect to exclude them.
+       Confidence: MED. -->
+  <rule id="116204" level="12">
+    <if_sid>100350</if_sid>
+    <field name="win.eventdata.attributeLDAPDisplayName" type="pcre2">(?i)^msDS-KeyCredentialLink$</field>
+    <options>no_full_log</options>
+    <description>AD: msDS-KeyCredentialLink written on $(win.eventdata.objectDN) by $(win.eventdata.subjectUserName) - shadow credentials</description>
+    <mitre><id>T1098</id></mitre>
+    <group>attack,shadow_credentials,</group>
+  </rule>
+
+  <!-- 116205: an AD CS object (template, enrollment service, CA) was modified in the
+       directory - ESC4 / ESC5 style template tampering. Confidence: MED. -->
+  <rule id="116205" level="12">
+    <if_sid>100350</if_sid>
+    <field name="win.eventdata.objectClass" type="pcre2">(?i)^(?:pKICertificateTemplate|pKIEnrollmentService|certificationAuthority)$</field>
+    <options>no_full_log</options>
+    <description>AD CS: $(win.eventdata.objectClass) object changed ($(win.eventdata.objectDN)) by $(win.eventdata.subjectUserName) - certificate template tampering</description>
+    <mitre><id>T1649</id></mitre>
+    <group>attack,adcs,</group>
+  </rule>
+
+  <!-- 116206: msDS-ManagedAccountPrecededByLink written = delegated managed service account
+       migration link, the BadSuccessor step (CVE-2025-53779, Server 2025 DCs only). Confidence: MED. -->
+  <rule id="116206" level="14">
+    <if_sid>100350</if_sid>
+    <field name="win.eventdata.attributeLDAPDisplayName" type="pcre2">(?i)^msDS-ManagedAccountPrecededByLink$</field>
+    <options>no_full_log</options>
+    <description>AD: dMSA predecessor link written on $(win.eventdata.objectDN) by $(win.eventdata.subjectUserName) - BadSuccessor</description>
+    <mitre><id>T1098</id></mitre>
+    <group>attack,badsuccessor,cve_2025_53779,</group>
+  </rule>
+
+  <!-- 116207: a delegated managed service account object was created (5137 under stock
+       60230). Rare outside a deliberate rollout. Confidence: MED. -->
+  <rule id="116207" level="10">
+    <if_sid>60230</if_sid>
+    <field name="win.eventdata.objectClass" type="pcre2">(?i)^msDS-DelegatedManagedServiceAccount$</field>
+    <options>no_full_log</options>
+    <description>AD: dMSA object created ($(win.eventdata.objectDN)) by $(win.eventdata.subjectUserName) - verify it is an intended rollout (BadSuccessor)</description>
+    <mitre><id>T1136.002</id></mitre>
+    <group>attack,badsuccessor,</group>
+  </rule>
+
+  <!-- ===== Coercion / relay ===== -->
+
+  <!-- 116208: remote access to the EFS RPC named pipe on a DC (PetitPotam coercion).
+       5145 is very high volume, but the pipe-name filter keeps this to coercion attempts.
+       Confidence: MED-LOW (the same pipe is used by some backup tools). -->
+  <rule id="116208" level="9">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^5145$</field>
+    <field name="win.eventdata.relativeTargetName" type="pcre2">(?i)^efsrpc$</field>
+    <options>no_full_log</options>
+    <description>AD: EFS RPC pipe accessed on $(win.system.computer) from $(win.eventdata.ipAddress) by $(win.eventdata.subjectUserName) - PetitPotam-style coercion</description>
+    <mitre><id>T1187</id></mitre>
+    <group>attack,coercion,petitpotam,</group>
+  </rule>
+
+  <!-- ===== AD CS certificate authority events (only if a CA exists in the lab) ===== -->
+
+  <!-- 116209: CA template loaded / updated / security descriptor changed (4898-4900).
+       Confidence: MED. -->
+  <rule id="116209" level="10">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID" type="pcre2">^(?:4898|4899|4900)$</field>
+    <options>no_full_log</options>
+    <description>AD CS: certificate template changed on the CA (event $(win.system.eventID)) by $(win.eventdata.subjectUserName)</description>
+    <mitre><id>T1649</id></mitre>
+    <group>attack,adcs,</group>
+  </rule>
+
+  <!-- ===== Remote-management tools ===== -->
+
+  <!-- 116210: AnyDesk installed as a service (System 7045). Ransomware crews use it for
+       persistence; on a box that only needs on-demand use this is suspicious.
+       Confidence: HIGH (event), MED (service name). -->
+  <rule id="116210" level="9">
+    <if_sid>60002</if_sid>
+    <field name="win.system.eventID">^7045$</field>
+    <field name="win.eventdata.serviceName" type="pcre2">(?i)anydesk</field>
+    <options>no_full_log</options>
+    <description>Remote tool: AnyDesk service installed on $(win.system.computer) ($(win.eventdata.imagePath))</description>
+    <mitre><id>T1219</id></mitre>
+    <group>remote_access_tool,anydesk,</group>
+  </rule>
+
+  <!-- 116211: AnyDesk started with unattended-access / install switches (4688 with command
+       line). Confidence: MED; needs process-creation auditing with command line. -->
+  <rule id="116211" level="11">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4688$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)anydesk.*\s--(?:install|silent|set-password|remove-password|start-with-win)\b</field>
+    <options>no_full_log</options>
+    <description>Remote tool: AnyDesk run with unattended-access switches on $(win.system.computer): $(win.eventdata.commandLine)</description>
+    <mitre><id>T1219</id></mitre>
+    <group>remote_access_tool,anydesk,</group>
+  </rule>
+
+</group>

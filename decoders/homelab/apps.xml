@@ -1,0 +1,117 @@
+<!--
+  Homelab application + Wazuh-plane decoders (2026-11 threat review)
+  Parents: jellyfin, qbittorrent, seerr, smbd (stock, child smbd_audit), wazuh-manager-log
+  (n8n uses the stock json decoder; no decoder is needed here)
+
+  EVERY FORMAT BELOW IS TAKEN FROM VENDOR SOURCE CODE, NOT FROM A LIVE LOG. The exact
+  rendering (quotes, timestamp format, locale) must be confirmed with wazuh-logtest on a
+  real line before the matching rule is trusted. Sources and caveats: docs/vuln-coverage.md.
+
+  Child decoders carry no prematch on purpose: each one extracts its own fields and simply
+  does not match lines of another kind (same pattern as decoders/unifi/unifi.xml).
+-->
+
+<!-- ===== Jellyfin: /var/log/jellyfin/jellyfinYYYYMMDD.log =====
+     Real format (checked on a 10.11 install): "[2026-11-20 18:33:57.651 +00:00] [INF] message" - the
+     file template of this build has no thread id and no source context, so the failed-login
+     line is expected as:
+     [ts] [INF] Authentication request for "name" has been denied (IP: "addr").
+     (not observed yet: no failed login has occurred on the reference host) -->
+<decoder name="jellyfin">
+  <prematch type="pcre2">^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} [+-]\d\d:\d\d\] \[[A-Z]{3}\] </prematch>
+</decoder>
+
+<decoder name="jellyfin">
+  <parent>jellyfin</parent>
+  <regex type="pcre2">Authentication request for "?(.*?)"? has been denied \(IP: "?([^")]+)"?\)</regex>
+  <order>srcuser, srcip</order>
+</decoder>
+
+<!-- ===== qBittorrent: qbittorrent.log, "(W) 2026-11-20T10:00:00 - message" ===== -->
+<decoder name="qbittorrent">
+  <prematch type="pcre2">^\([NIWC]\) \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d - WebAPI login </prematch>
+</decoder>
+
+<decoder name="qbittorrent">
+  <parent>qbittorrent</parent>
+  <regex type="pcre2">login failure\. Reason: invalid credentials, attempt count: (\d+), IP: ([^,\s]+), username: (\S+)</regex>
+  <order>qbt.attempts, srcip, srcuser</order>
+</decoder>
+
+<decoder name="qbittorrent">
+  <parent>qbittorrent</parent>
+  <regex type="pcre2">login failure\. Reason: IP has been banned, IP: ([^,\s]+), username: (\S+)</regex>
+  <order>srcip, srcuser</order>
+</decoder>
+
+<!-- ===== Seerr (winston text log): "... [warn][API]: Failed sign-in attempt using invalid Seerr password {json}" ===== -->
+<!-- The syslog predecoder swallows the "[warn][API]:" part, so only the message text is matched. -->
+<decoder name="seerr">
+  <prematch>Failed sign-in attempt</prematch>
+</decoder>
+
+<decoder name="seerr">
+  <parent>seerr</parent>
+  <regex type="pcre2">"ip":"([^"]+)"</regex>
+  <order>srcip</order>
+</decoder>
+
+<decoder name="seerr">
+  <parent>seerr</parent>
+  <regex type="pcre2">"email":"([^"]+)"</regex>
+  <order>srcuser</order>
+</decoder>
+
+<!-- ===== Samba vfs_full_audit via syslog (program smbd_audit) =====
+     REQUIRES smb.conf:  full_audit:prefix = %u|%I|%S
+     line: user|client|share|op|ok|args   (args are pipe separated, e.g. renameat src|dst) -->
+<!-- The stock decoder "smbd" (program_name ^smbd) already claims program smbd_audit and is
+     loaded first, so this decoder is a CHILD of it; the rules chain onto stock rule 13100. -->
+<decoder name="smbd_audit">
+  <parent>smbd</parent>
+  <regex type="pcre2">^([^|]+)\|([^|]+)\|([^|]+)\|(\w+)\|(ok|fail[^|]*)\|?(.*)$</regex>
+  <order>srcuser, srcip, smb.share, smb.op, smb.result, smb.args</order>
+</decoder>
+
+<!-- ===== Wazuh manager ossec.log (authd / remoted); needs a <localfile> for ossec.log =====
+     2026/11/20 10:00:00 wazuh-authd: WARNING: Duplicate name 'x', rejecting enrollment. ...
+     Message text is from wazuh v4.14.10 source; master (5.x) changed some of it. -->
+<decoder name="wazuh-manager-log">
+  <prematch type="pcre2">^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d wazuh-(?:authd|remoted): </prematch>
+</decoder>
+
+<decoder name="wazuh-manager-log">
+  <parent>wazuh-manager-log</parent>
+  <regex type="pcre2">Invalid password provided by (\S+?)\. Closing</regex>
+  <order>srcip</order>
+</decoder>
+
+<decoder name="wazuh-manager-log">
+  <parent>wazuh-manager-log</parent>
+  <regex type="pcre2">Received request for a new agent \(([^)]*)\) from: (\S+)</regex>
+  <order>wz.agent, srcip</order>
+</decoder>
+
+<decoder name="wazuh-manager-log">
+  <parent>wazuh-manager-log</parent>
+  <regex type="pcre2">Agent key generated for '([^']*)' \(requested by (\S+)\)</regex>
+  <order>wz.agent, srcip</order>
+</decoder>
+
+<decoder name="wazuh-manager-log">
+  <parent>wazuh-manager-log</parent>
+  <regex type="pcre2">Duplicate (?:name|IP) '([^']*)', rejecting enrollment</regex>
+  <order>wz.agent</order>
+</decoder>
+
+<decoder name="wazuh-manager-log">
+  <parent>wazuh-manager-log</parent>
+  <regex type="pcre2">\((14\d\d)\): [^']*agent '([^']*)' at '([^']*)'</regex>
+  <order>wz.errcode, wz.agent, srcip</order>
+</decoder>
+
+<decoder name="wazuh-manager-log">
+  <parent>wazuh-manager-log</parent>
+  <regex type="pcre2">\(1407\): Duplicated counter for '([^']*)'</regex>
+  <order>wz.agent</order>
+</decoder>

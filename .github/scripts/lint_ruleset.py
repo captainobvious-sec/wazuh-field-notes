@@ -106,6 +106,15 @@ def check_rules():
                          f"rule {rid}: <same_field>{sf}</same_field> is a static "
                          "field; use the <same_*/> operator instead")
 
+            # OS_Regex (the default type) has no (?:...) / (?i) groups: analysisd
+            # rejects the file with "Syntax error on tag" (5107) at load time.
+            for tag, attrs, rx in re.findall(
+                    r"<(field|match|regex|action|url|status|srcip|dstip|user|id|extra_data)"
+                    r"((?:\s+[a-z_]+=\"[^\"]*\")*)>([^<]*)</\1>", body):
+                if 'type="pcre2"' not in attrs and re.search(r"\(\?", rx):
+                    note("regex-type", rel(p), line,
+                         f"rule {rid}: <{tag}> uses PCRE syntax but has no type=\"pcre2\"")
+
             for rx in re.findall(r'type="pcre2">(.*?)</', body, re.S):
                 if INLINE_FLAGS.search(rx) and not rx.startswith("(?"):
                     warn("regex-style", rel(p), line,

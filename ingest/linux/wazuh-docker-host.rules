@@ -1,0 +1,16 @@
+## ---------------------------------------------------------------------------
+## Minimal auditd rules for hosts that are NOT Rocky servers (Ubuntu Docker VM).
+## Deploy to /etc/audit/rules.d/wazuh-homelab.rules, then: augenrules --load
+## Unlike wazuh-linux.rules this does NOT audit every euid=0 execve: on a container host
+## every root process in every container would be logged. Only the binaries the 116xxx
+## rules read are audited, so volume stays at a few lines per day.
+## Key audit-wazuh-c is mapped to "command" by the stock etc/lists/audit-keys, which routes
+## the EXECVE record to rule 80792 and from there to 116000 / 116003 / 116004.
+## ---------------------------------------------------------------------------
+# NOTE sudo (rule 116000, CVE-2025-32463): Ubuntu 25.10+ ships sudo-rs, which has no -R option and is
+# not affected. On a host with the classic sudo, add:
+#   -a always,exit -F arch=b64 -F exe=/usr/bin/sudo -S execve -k audit-wazuh-c
+# docker CLI: privileged / host-mount staging (rules 116003, 116004)
+-a always,exit -F arch=b64 -F exe=/usr/bin/docker -S execve -k audit-wazuh-c
+# AF_ALG socket by a real user (rule 116001); a0=38 is AF_ALG
+-a always,exit -F arch=b64 -S socket -F a0=38 -F auid>=1000 -F auid!=4294967295 -k rocky_priv_afalg

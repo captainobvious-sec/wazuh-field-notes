@@ -1,0 +1,10 @@
+<!--
+  PBS API access log (rules 100880-100883).
+  Add to the ossec.conf of each PBS host agent (or a shared agent.conf for a PBS group).
+  PBS already ships journald to Wazuh for the authentication rules; this file is separate
+  because journald does not carry the access log.
+-->
+<localfile>
+  <log_format>syslog</log_format>
+  <location>/var/log/proxmox-backup/api/access.log</location>
+</localfile>

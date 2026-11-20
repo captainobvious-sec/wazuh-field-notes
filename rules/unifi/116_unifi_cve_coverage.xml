@@ -1,0 +1,35 @@
+<!--
+  UniFi - known-intrusion indicators (2026-11 threat review)
+  ID range: 116100-116109
+  File name starts with 116_ on purpose: root rules are evaluated in load order and the
+  first root rule that matches wins, so an indicator rule must load BEFORE unifi.xml
+  (whose 100740/100743 root rules would otherwise claim the same events).
+
+  SOURCE: public incident reporting on the UniFi OS command-injection chain
+  (Ubiquiti bulletin SAB-064, CISA KEV listing 2026-06-23). Confidence: MED. Account names
+  come from incident write-ups, not from a Ubiquiti document.
+-->
+<group name="unifi,vuln_coverage,">
+
+  <!-- 116100: the two admin account names created by the botnet in observed intrusions.
+       Matches on the whole CEF line, so it fires whether the event is a login, a user
+       creation or a config change. -->
+  <rule id="116100" level="14">
+    <decoded_as>unifi</decoded_as>
+    <regex type="pcre2">(?i)\b(?:unifi_support|supports_unifi_system)\b</regex>
+    <description>UniFi: rogue admin name seen ($(uni_admin)) - known UniFi OS exploitation indicator</description>
+    <mitre><id>T1136.001</id><id>T1190</id></mitre>
+    <group>account_changed,attack,</group>
+  </rule>
+
+  <!-- 116101: an IPS signature that names one of the exploited UniFi CVEs. The signature
+       text is not published for these, so this is a safety net for when it appears. -->
+  <rule id="116101" level="13">
+    <decoded_as>unifi</decoded_as>
+    <field name="uni_signature" type="pcre2">(?i)CVE-2026-(?:34908|34909|34910|22557)</field>
+    <description>UniFi IPS: exploit signature for $(uni_signature) from $(srcip)</description>
+    <mitre><id>T1190</id></mitre>
+    <group>ids,attack,</group>
+  </rule>
+
+</group>

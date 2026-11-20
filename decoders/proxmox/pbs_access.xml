@@ -1,0 +1,12 @@
+<!--
+  PBS API access log decoder (new, 2026-11 threat review)
+  File: /var/log/proxmox-backup/api/access.log   (needs the localfile in ingest/proxmox/)
+  Format (proxmox-rest-server rest.rs):  {ip} - {auth_id} [dd/mm/YYYY:HH:MM:SS +zzzz] "{method} {path}" {status} {size} {user_agent}
+  auth_id is "-" without authentication and "user@realm!tokenname" for an API token.
+  From source, not from a live line: confirm with wazuh-logtest.
+-->
+<decoder name="pbs-access">
+  <prematch type="pcre2">^\S+ - \S+ \[\d\d/\d\d/\d{4}:\d\d:\d\d:\d\d [+-]\d{4}\] "[A-Z]+ /api2/</prematch>
+  <regex type="pcre2">^(\S+) - (\S+) \[[^\]]+\] "([A-Z]+) (/api2/\S+?)(?: HTTP/\d\.\d)?" (\d{3}) </regex>
+  <order>srcip, dstuser, action, url, status</order>
+</decoder>
